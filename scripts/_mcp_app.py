@@ -9,6 +9,9 @@ from types import ModuleType
 ROOT = Path(__file__).resolve().parents[1]
 MCP_SRC = ROOT / "src" / "mcp_server"
 
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 
 def load_mcp_module(module_filename: str, module_name: str) -> ModuleType:
     module_path = MCP_SRC / module_filename

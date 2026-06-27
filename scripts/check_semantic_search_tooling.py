@@ -57,6 +57,22 @@ def main() -> None:
     assert 'targetVectors: ["content"]' in query
     assert "chunkId recordId sourceFile" in query
 
+    payload = {"data": {"Get": {semantic.COLLECTION_NAME: [{"chunkId": "pattern:CC-043"}]}}}
+    assert semantic.search_rows_from_payload(
+        payload,
+        collection_name=semantic.COLLECTION_NAME,
+    ) == [{"chunkId": "pattern:CC-043"}]
+    assert semantic.search_rows_from_payload({}, collection_name=semantic.COLLECTION_NAME) == []
+    try:
+        semantic.search_rows_from_payload(
+            {"errors": [{"message": "bad query"}]},
+            collection_name=semantic.COLLECTION_NAME,
+        )
+    except RuntimeError as exc:
+        assert "bad query" in str(exc)
+    else:
+        raise AssertionError("expected Weaviate GraphQL errors to raise")
+
     with tempfile.TemporaryDirectory() as raw_tmp:
         tmp = Path(raw_tmp)
         doc = tmp / "sample.md"

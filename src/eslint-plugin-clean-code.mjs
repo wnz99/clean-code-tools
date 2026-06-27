@@ -143,31 +143,37 @@ function isStringOrNumberLiteral(node) {
   );
 }
 
-function collectPatternIdentifiers(node, identifiers = []) {
-  if (!node) {
-    return identifiers;
+function collectPatternIdentifiers(node) {
+  const identifiers = [];
+
+  function collect(current) {
+    if (!current) {
+      return;
+    }
+    switch (current.type) {
+      case "Identifier":
+        identifiers.push(current.name);
+        break;
+      case "AssignmentPattern":
+        collect(current.left);
+        break;
+      case "ArrayPattern":
+        for (const element of current.elements) {
+          collect(element);
+        }
+        break;
+      case "ObjectPattern":
+        for (const property of current.properties) {
+          collect(property.value ?? property.argument);
+        }
+        break;
+      case "RestElement":
+        collect(current.argument);
+        break;
+    }
   }
-  switch (node.type) {
-    case "Identifier":
-      identifiers.push(node.name);
-      break;
-    case "AssignmentPattern":
-      collectPatternIdentifiers(node.left, identifiers);
-      break;
-    case "ArrayPattern":
-      for (const element of node.elements) {
-        collectPatternIdentifiers(element, identifiers);
-      }
-      break;
-    case "ObjectPattern":
-      for (const property of node.properties) {
-        collectPatternIdentifiers(property.value ?? property.argument, identifiers);
-      }
-      break;
-    case "RestElement":
-      collectPatternIdentifiers(node.argument, identifiers);
-      break;
-  }
+
+  collect(node);
   return identifiers;
 }
 

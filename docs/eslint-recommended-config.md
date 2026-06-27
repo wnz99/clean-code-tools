@@ -31,7 +31,8 @@ export default [
   ...cleanCode,
   {
     rules: {
-      "max-lines-per-function": ["warn", { max: 120, skipBlankLines: true, skipComments: true }],
+      "max-lines": ["warn", { max: 300, skipBlankLines: true, skipComments: true }],
+      "max-lines-per-function": ["warn", { max: 50, skipBlankLines: true, skipComments: true }],
     },
   },
 ];
@@ -55,7 +56,7 @@ The package declares these peer dependencies:
 
 | Corpus area | Existing ESLint coverage |
 | --- | --- |
-| Small functions and complexity, `CC-033..CC-059`, `CC-206` | `complexity`, `max-depth`, `max-lines-per-function`, `max-params`, `sonarjs/cognitive-complexity` |
+| Small files, functions, and complexity, `CC-033..CC-059`, `CC-137..CC-142`, `CC-206` | `complexity`, `max-depth`, `max-lines`, `max-lines-per-function`, `max-params`, `sonarjs/cognitive-complexity` |
 | Magic numbers and repeated literals, `CC-018`, `CC-234` | `@typescript-eslint/no-magic-numbers`, `sonarjs/no-duplicate-string` |
 | TODO/FIXME visibility, `CC-068` | `clean-code/todo-format` |
 | Duplicate conditions and branches, `CC-160`, `CC-214` | `sonarjs/no-duplicated-branches`, `sonarjs/no-identical-conditions`, `sonarjs/no-identical-functions` |

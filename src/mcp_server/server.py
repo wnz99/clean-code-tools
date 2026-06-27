@@ -8,6 +8,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from src.mcp_server.server_payloads import (
+    default_lint_targets,
+    facet_counts,
+    lint_rule_recommendation,
+    search_result,
+)
+
 MAX_SEARCH_LIMIT = 25
 
 
@@ -210,41 +217,7 @@ def recommend_clean_code_lint_rules(
 def list_clean_code_facets() -> dict[str, Any]:
     """Return available filter facets for clean-code pattern search."""
 
-    chunks = build_chunks()
-    facets: dict[str, dict[str, int]] = {
-        "topics": {},
-        "rule_families": {},
-        "lintability": {},
-        "source_kinds": {},
-        "languages": {},
-        "chunk_kinds": {},
-    }
-    for chunk in chunks:
-        increment(facets["topics"], chunk.topic)
-        increment(facets["rule_families"], chunk.rule_family)
-        increment(facets["lintability"], chunk.lintability)
-        increment(facets["source_kinds"], chunk.source_kind)
-        increment(facets["chunk_kinds"], chunk.chunk_kind)
-        for language in chunk.languages:
-            increment(facets["languages"], language)
-    return facets
-
-
-def search_result(row: dict[str, Any]) -> dict[str, Any]:
-    additional = row.get("_additional") or {}
-    content = " ".join(str(row.get("contentText", "")).split())
-    return {
-        "chunk_id": row.get("chunkId", ""),
-        "record_id": row.get("recordId", ""),
-        "title": row.get("title", ""),
-        "topic": row.get("topic", ""),
-        "source_file": row.get("sourceFile", ""),
-        "source_kind": row.get("sourceKind", ""),
-        "rule_family": row.get("ruleFamily", ""),
-        "lintability": row.get("lintability", ""),
-        "distance": additional.get("distance"),
-        "snippet": content[:500],
-    }
+    return facet_counts(build_chunks())
 
 
 def pattern_by_id(pattern_id: str) -> dict[str, Any]:
@@ -255,50 +228,6 @@ def pattern_by_id(pattern_id: str) -> dict[str, Any]:
     if record is None:
         raise ValueError(f"pattern not found: {normalized}")
     return record
-
-
-def lint_rule_recommendation(result: dict[str, Any], targets: list[str]) -> dict[str, Any]:
-    return {
-        "pattern_id": result["pattern_id"],
-        "title": result["title"],
-        "rule_family": result["rule_family"],
-        "lintability": result["lintability"],
-        "confidence": result["confidence"],
-        "score": result["score"],
-        "targets": targets,
-        "static_signals": result.get("lint_candidates", []),
-        "false_positive_risks": false_positive_risks(result),
-        "suppression_strategy": suppression_strategy(targets),
-        "autofix": "review required; only offer autofix for syntax-preserving local rewrites",
-        "match_reasons": result.get("match_reasons", []),
-    }
-
-
-def default_lint_targets(language: str) -> list[str]:
-    if language == "typescript":
-        return ["eslint", "semgrep"]
-    if language == "python":
-        return ["ruff", "pylint", "semgrep"]
-    return ["eslint", "ruff", "pylint", "semgrep"]
-
-
-def false_positive_risks(result: dict[str, Any]) -> list[str]:
-    risks = [
-        "local project conventions may intentionally allow this shape",
-        "tests, generated files, fixtures, and framework adapters may be safe contexts",
-    ]
-    if result.get("lintability") == "medium":
-        risks.append("medium-lintability patterns need narrower project-specific allowlists")
-    return risks
-
-
-def suppression_strategy(targets: list[str]) -> str:
-    return f"use the narrowest inline suppression supported by {', '.join(targets)} and require a reason"
-
-
-def increment(counter: dict[str, int], value: str) -> None:
-    if value:
-        counter[value] = counter.get(value, 0) + 1
 
 
 def parse_args() -> argparse.Namespace:

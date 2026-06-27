@@ -45,13 +45,21 @@ export default tseslint.config(
       unicorn,
     },
     rules: {
-      // CC-033..CC-059, CC-206: keep functions small enough to scan.
+      // CC-033..CC-059, CC-137..CC-142, CC-206: keep units small enough to scan.
       complexity: ["warn", { max: 10 }],
       "max-depth": ["warn", 4],
+      "max-lines": [
+        "warn",
+        {
+          max: 300,
+          skipBlankLines: true,
+          skipComments: true,
+        },
+      ],
       "max-lines-per-function": [
         "warn",
         {
-          max: 80,
+          max: 50,
           skipBlankLines: true,
           skipComments: true,
         },
@@ -194,6 +202,7 @@ export default tseslint.config(
     files: TEST_FILE_PATTERNS,
     rules: {
       "@typescript-eslint/no-magic-numbers": "off",
+      "max-lines": "off",
       "max-lines-per-function": "off",
       "max-params": "off",
       "sonarjs/no-identical-functions": "off",

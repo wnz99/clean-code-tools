@@ -26,6 +26,7 @@
     "ops/",
     "src/eslint-plugin-clean-code.mjs",
     "src/mcp_server/*.py",
+    "src/mcp_server/utils/*.py",
     "README.md",
     "package.json"
   ],
