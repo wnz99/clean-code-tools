@@ -17,10 +17,32 @@ evidence, not from the task title or a generic desire to "make it cleaner." The
 agent remains responsible for judging whether retrieved guidance fits the local
 framework, public API, tests, performance constraints, and project conventions.
 
+This skill is self-contained. Do not assume separate language-specific
+clean-code skills are installed. Use the language heuristics below when judging
+Python, JavaScript, TypeScript, or React code.
+
+## Refactor Discipline
+
+- Read formatter, linter, type-checker, framework, tests, and nearby files
+  before applying generic advice.
+- Name the concrete smell before proposing a cleanup.
+- Keep the refactor local unless the user asks for a broader redesign.
+- Preserve public APIs, return shapes, exception behavior, async boundaries,
+  mutability expectations, and framework contracts.
+- Prefer the smallest useful change: rename, flatten control flow, extract one
+  cohesive helper, introduce a stable data shape, or clarify an error boundary.
+- Avoid class hierarchies, speculative abstractions, trivial wrappers, and
+  extraction that hides the main logic.
+- Optimize for the call site: the best boundary makes the caller obviously
+  correct.
+- Verify that tests, lint, types, and the relevant runtime contract still hold.
+
 ## When To Use The MCP
 
 Use the MCP when you have a specific clean-code concern:
 
+- following up deterministic lint triggers emitted as clean-code review
+  candidates
 - reviewing a possible maintainability finding
 - planning a behavior-preserving refactor
 - deciding whether a pattern is lintable
@@ -46,6 +68,13 @@ Do not query for:
 5. If a result looks useful, call `get_clean_code_pattern` for full detail.
 6. Use the pattern only when it matches a concrete code anchor.
 7. Say there is no strong clean-code match when results are generic or weak.
+
+When a repo provides `clean-code-review-candidates/v1` input, treat each
+candidate as a deterministic tripwire, not as a finding. Read the file plus the
+symbol or anchor named by the candidate, check whether the listed semantic
+questions are actually supported by the code, then run only the relevant MCP
+queries. A candidate may produce `no strong clean-code match`, an advisory note,
+or a targeted refactor plan.
 
 Prefer concise queries over whole-file or whole-diff input.
 
@@ -107,6 +136,37 @@ is public.
 
 Avoid findings that say only "Clean code says..." or "Pattern CC-043 says...".
 The issue must stand on the code.
+
+## Language Heuristics
+
+For Python:
+
+- Prefer Pythonic clarity over abstract purity.
+- Use plain functions when data flow is simple.
+- Use `TypedDict` for stable mapping-shaped data, `dataclass` for value-like
+  data, and richer models only when validation, serialization, or invariants
+  justify them.
+- Use keyword-only parameters when they improve call-site clarity.
+- Preserve the local failure style: exceptions, `None`, result objects, or
+  framework responses.
+- Separate parsing, validation, transformation, and side effects when they are
+  tangled.
+- Do not add docstrings to every private helper; comments should explain why,
+  constraints, or surprising behavior.
+
+For JavaScript and TypeScript:
+
+- Prefer domain names over implementation names; drop vague suffixes like
+  `Data`, `Info`, `Manager`, or `Helper` unless they distinguish real concepts.
+- Use boolean names that read like questions: `isReady`, `hasAccess`,
+  `shouldRetry`.
+- Prefer stronger TypeScript types over explanatory comments.
+- Narrow external data early and keep internal code on trusted shapes.
+- Use discriminated unions when the code already branches on variants.
+- Prefer object parameters when several values travel together, but do not
+  introduce options objects only to satisfy an arbitrary parameter count.
+- Follow the existing error boundary style: throw, result object, or
+  framework-specific response.
 
 ## Refactor Output
 

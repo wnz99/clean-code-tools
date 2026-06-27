@@ -44,3 +44,17 @@ npm run check
 ```
 
 The agent-facing tools are documented in `docs/fastmcp-local-server.md`.
+
+## Static Triggers to Semantic Review
+
+Use deterministic lint output as the first pass, then hand selected
+maintainability tripwires to an agent or MCP-backed review:
+
+```bash
+npm run clean-code:candidates -- \
+  --pylint-command "uv run --group lint pylint src/mcp_server --output-format=json" \
+  --ruff-command "uv run --group lint ruff check src/mcp_server --output-format=json"
+```
+
+The workflow and `clean-code-review-candidates/v1` schema are documented in
+`docs/static-trigger-semantic-review.md`.
