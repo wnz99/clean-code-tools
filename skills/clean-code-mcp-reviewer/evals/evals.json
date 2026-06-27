@@ -1,0 +1,30 @@
+{
+  "skill_name": "clean-code-mcp-reviewer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Review this TypeScript helper. Use the clean-code MCP only if it helps.\n\n```ts\nexport function calculatePrice(customer: Customer, includeDiscounts: boolean): Money {\n  let total = customer.cart.subtotal;\n  if (includeDiscounts) {\n    total = total.minus(customer.discountAmount);\n  }\n  return total;\n}\n\nconst invoicePrice = calculatePrice(customer, false);\nconst checkoutPrice = calculatePrice(customer, true);\n```",
+      "expected_output": "The agent reads the code first, queries for a boolean selector or flag argument pattern, uses a high-fit match, and anchors the finding to the local function/callers."
+    },
+    {
+      "id": 2,
+      "prompt": "Review this React component and decide whether clean-code MCP guidance should block it.\n\n```tsx\nexport function SaveDialog({ isSaving }: { isSaving: boolean }) {\n  return (\n    <Modal open>\n      <Button disabled={isSaving}>Save</Button>\n    </Modal>\n  );\n}\n```",
+      "expected_output": "The agent treats declarative React boolean props as a near-miss and avoids a flag-argument finding unless there is behavior-selection evidence."
+    },
+    {
+      "id": 3,
+      "prompt": "Plan a Python refactor for this function. Use the clean-code MCP only after identifying the concern.\n\n```python\ndef normalize_order(order: Order, errors: list[str]) -> str:\n    if order.total <= 0:\n        errors.append(\"total must be positive\")\n        return \"invalid\"\n    order.customer_email = order.customer_email.strip().lower()\n    return \"valid\"\n```",
+      "expected_output": "The agent queries for output argument mutation or side-effect concerns, fetches details only for a relevant match, and proposes a behavior-preserving refactor with verification."
+    },
+    {
+      "id": 4,
+      "prompt": "Design a clean-code lint check for repeated TODO comments in TypeScript and Python.\n\nExamples that should pass:\n```ts\n// TODO(PROJ-123): remove legacy tax fallback after migration.\n```\n\nExamples that should fail:\n```python\n# TODO fix this later\nresult = legacy_process(data)\n```",
+      "expected_output": "The agent uses lintability filters, distinguishes valid tracked TODOs from weak comments, and recommends appropriate target tooling and false-positive controls."
+    },
+    {
+      "id": 5,
+      "prompt": "Review this generated API client fixture change and decide whether clean-code patterns should block it.\n\n```ts\n// generated from billing-openapi.yaml\nexport const fixture = {\n  account: { owner: { address: { city: \"London\" } } },\n  status: \"active\"\n};\n\nexport const city = fixture.account.owner.address.city;\n```\n\nThe file path is `src/generated/billingClient.fixture.ts`.",
+      "expected_output": "The agent recognizes generated/fixture code as a weak-match context and reports no strong clean-code finding unless local project rules say otherwise."
+    }
+  ]
+}

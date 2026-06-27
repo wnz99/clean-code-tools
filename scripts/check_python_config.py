@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "configs" / "python.clean-code.pyproject.toml"
@@ -30,14 +28,6 @@ def run(command: list[str], cwd: Path, check: bool = True) -> subprocess.Complet
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="clean-code-python-config-") as raw_tmp:
         tmp = Path(raw_tmp)
-        venv = tmp / ".venv"
-        run([sys.executable, "-m", "venv", str(venv)], cwd=tmp)
-
-        python = venv / "bin" / "python"
-        ruff = venv / "bin" / "ruff"
-        pylint = venv / "bin" / "pylint"
-
-        run([str(python), "-m", "pip", "install", "--quiet", "ruff>=0.15.0", "pylint>=4.0.0"], cwd=tmp)
         shutil.copyfile(CONFIG, tmp / "pyproject.toml")
 
         (tmp / "sample.py").write_text(
@@ -61,11 +51,42 @@ def calculate_total(order, include_tax, dry_run, retry, verbose, mode):
 """.lstrip(),
         )
 
-        run([str(ruff), "check", "sample.py"], cwd=tmp)
-        run([str(pylint), "--rcfile=pyproject.toml", "sample.py"], cwd=tmp)
+        run(["uv", "run", "--project", str(ROOT), "--group", "lint", "ruff", "check", "sample.py"], cwd=tmp)
+        run(
+            [
+                "uv",
+                "run",
+                "--project",
+                str(ROOT),
+                "--group",
+                "lint",
+                "pylint",
+                "--rcfile=pyproject.toml",
+                "sample.py",
+            ],
+            cwd=tmp,
+        )
 
-        ruff_smelly = run([str(ruff), "check", "smelly.py"], cwd=tmp, check=False)
-        pylint_smelly = run([str(pylint), "--rcfile=pyproject.toml", "smelly.py"], cwd=tmp, check=False)
+        ruff_smelly = run(
+            ["uv", "run", "--project", str(ROOT), "--group", "lint", "ruff", "check", "smelly.py"],
+            cwd=tmp,
+            check=False,
+        )
+        pylint_smelly = run(
+            [
+                "uv",
+                "run",
+                "--project",
+                str(ROOT),
+                "--group",
+                "lint",
+                "pylint",
+                "--rcfile=pyproject.toml",
+                "smelly.py",
+            ],
+            cwd=tmp,
+            check=False,
+        )
 
         if ruff_smelly.returncode == 0:
             print("Expected Ruff to report clean-code findings for smelly.py")

@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,23 +25,65 @@ def run(command: list[str], cwd: Path, check: bool = True) -> subprocess.Complet
 
 
 def check_python_app() -> None:
-    with tempfile.TemporaryDirectory(prefix="clean-code-python-sample-") as raw_tmp:
-        tmp = Path(raw_tmp)
-        venv = tmp / ".venv"
-        run([sys.executable, "-m", "venv", str(venv)], cwd=tmp)
-
-        python = venv / "bin" / "python"
-        ruff = venv / "bin" / "ruff"
-        pylint = venv / "bin" / "pylint"
+    with tempfile.TemporaryDirectory(prefix="clean-code-python-sample-"):
         app = ROOT / "sample-apps" / "python-app"
 
-        run([str(python), "-m", "pip", "install", "--quiet", "ruff>=0.15.0", "pylint>=4.0.0"], cwd=tmp)
-        run([str(ruff), "check", "src/clean_pricing.py"], cwd=app)
-        run([str(pylint), "--rcfile=pyproject.toml", "src/clean_pricing.py"], cwd=app)
+        run(
+            [
+                "uv",
+                "run",
+                "--project",
+                str(ROOT),
+                "--group",
+                "lint",
+                "ruff",
+                "check",
+                "src/clean_pricing.py",
+            ],
+            cwd=app,
+        )
+        run(
+            [
+                "uv",
+                "run",
+                "--project",
+                str(ROOT),
+                "--group",
+                "lint",
+                "pylint",
+                "--rcfile=pyproject.toml",
+                "src/clean_pricing.py",
+            ],
+            cwd=app,
+        )
 
-        ruff_smelly = run([str(ruff), "check", "src/smelly_pricing.py"], cwd=app, check=False)
+        ruff_smelly = run(
+            [
+                "uv",
+                "run",
+                "--project",
+                str(ROOT),
+                "--group",
+                "lint",
+                "ruff",
+                "check",
+                "src/smelly_pricing.py",
+            ],
+            cwd=app,
+            check=False,
+        )
         pylint_smelly = run(
-            [str(pylint), "--rcfile=pyproject.toml", "src/smelly_pricing.py"],
+            [
+                "uv",
+                "run",
+                "--project",
+                str(ROOT),
+                "--group",
+                "lint",
+                "pylint",
+                "--rcfile=pyproject.toml",
+                "src/smelly_pricing.py",
+            ],
             cwd=app,
             check=False,
         )

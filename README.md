@@ -22,4 +22,25 @@ Suggested vector metadata fields:
 - `title`
 - `description`
 - `lint_candidates`
-# clean-code-tools
+
+## Local MCP
+
+This repo includes a uv-backed FastMCP server in `src/mcp_server` for local
+clean-code pattern search.
+
+```bash
+uv sync
+npm run weaviate:dev:start
+npm run semantic:ingest -- --reset
+npm run mcp:http
+```
+
+Useful checks:
+
+```bash
+npm run check:fastmcp
+npm run check:retrieval-evals
+npm run check
+```
+
+The agent-facing tools are documented in `docs/fastmcp-local-server.md`.

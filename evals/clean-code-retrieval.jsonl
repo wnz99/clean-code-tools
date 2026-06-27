@@ -1,0 +1,13 @@
+{"id":"flag-argument-ts","query":"typescript boolean parameter controls behavior selector argument calculatePrice true false","language":"typescript","expected_top_ids":["CC-043","CC-208"],"vector_ids":["CC-047","CC-043","CC-208","CC-195"],"should_strong_match":true}
+{"id":"todo-without-issue","query":"TODO fix this later comment without issue id","language":"typescript","expected_top_ids":["CC-068"],"vector_ids":["CC-064","CC-068","CC-071","CC-012"],"should_strong_match":true}
+{"id":"train-wreck","query":"deep property chain account owner address city train wreck transitive navigation","language":"typescript","expected_top_ids":["CC-107"],"vector_ids":["CC-106","CC-107","CC-245","CC-001"],"should_strong_match":true}
+{"id":"output-argument-python","query":"python function mutates output argument errors list and returns status","language":"python","expected_top_ids":["CC-050","CC-207"],"vector_ids":["CC-047","CC-050","CC-207","CC-052"],"should_strong_match":true}
+{"id":"tracked-todo-nearmiss","query":"TODO(PROJ-123) remove legacy fallback after migration tracked issue marker","language":"typescript","expected_top_ids":["CC-068"],"vector_ids":["CC-068","CC-064","CC-071"],"should_strong_match":false}
+{"id":"generated-fixture-nearmiss","query":"generated api client fixture deep dto property chain hard coded fixture literal","language":"typescript","expected_top_ids":["CC-107"],"vector_ids":["CC-107","CC-002","CC-245"],"should_strong_match":false}
+{"id":"vague-nonsense","query":"do this thing with code","language":"typescript","expected_top_ids":[],"vector_ids":["CC-001","CC-012","CC-191"],"should_strong_match":false}
+{"id":"broad-comment-category","query":"python comment","language":"python","expected_top_ids":[],"vector_ids":["CC-199","CC-200","CC-201"],"should_strong_match":false}
+{"id":"broad-error-category","query":"error handling","language":"typescript","expected_top_ids":[],"vector_ids":["CC-054","CC-112","CC-113"],"should_strong_match":false}
+{"id":"generic-clean-code","query":"clean code","language":"typescript","expected_top_ids":[],"vector_ids":["CC-001","CC-012","CC-191"],"should_strong_match":false}
+{"id":"generic-code-smell","query":"code smell","language":"python","expected_top_ids":[],"vector_ids":["CC-199","CC-200","CC-201"],"should_strong_match":false}
+{"id":"generic-planning-guidance","query":"planning guidance","language":"typescript","expected_top_ids":[],"vector_ids":["CC-001","CC-012","CC-191"],"should_strong_match":false}
+{"id":"generic-refactoring-rule","query":"refactoring rule","language":"python","expected_top_ids":[],"vector_ids":["CC-050","CC-107","CC-207"],"should_strong_match":false}

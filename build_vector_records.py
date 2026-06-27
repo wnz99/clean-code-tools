@@ -5,7 +5,6 @@ import json
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / "clean-code-examples.md"
 OUTPUT = ROOT / "clean-code-patterns.jsonl"
@@ -156,6 +155,12 @@ def infer_family(title: str, topic: str) -> str:
     return "clean_code"
 
 
+def clean_topic(value: str) -> str:
+    topic = re.sub(r"^chapter\s+\d+:\s*", "", value, flags=re.IGNORECASE).strip()
+    topic = re.sub(r"^smells and heuristics\s*-\s*", "", topic, flags=re.IGNORECASE).strip()
+    return topic
+
+
 def aliases_for(title: str, topic: str, family: str) -> list[str]:
     title_terms = normalize_terms(title)
     aliases = [title.lower(), *title_terms, *ALIAS_BY_FAMILY.get(family, [])]
@@ -163,7 +168,7 @@ def aliases_for(title: str, topic: str, family: str) -> list[str]:
     for needle, extra_aliases in TITLE_ALIASES.items():
         if needle in lower_title:
             aliases.extend(extra_aliases)
-    aliases.append(topic.lower().replace("chapter 17: smells and heuristics - ", ""))
+    aliases.append(clean_topic(topic).lower())
     aliases.extend(["clean code", "code smell", "planning guidance", "refactoring rule"])
     return unique_clean(aliases)[:12]
 
@@ -365,7 +370,7 @@ def enrich(parsed: dict[str, str]) -> dict:
     record = {
         "id": parsed["id"],
         "title": parsed["title"],
-        "topic": parsed["topic"],
+        "topic": clean_topic(parsed["topic"]),
         "rule_family": family,
         "aliases": aliases,
         "problem": build_problem(parsed["title"], parsed["description"], aliases),
