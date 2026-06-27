@@ -1,0 +1,25 @@
+# Clean Code Pattern Examples
+
+This directory contains a vectorization-friendly corpus of clean-code examples inspired by the major topics in *Clean Code*. It does not copy the book text. Each entry is written as original guidance with paired TypeScript and Python examples.
+
+Use `clean-code-examples.md` as the first source for an MCP knowledge base. It currently contains 264 entries covering the named chapter points from the contents plus the Chapter 17 smell/heuristic list. The headings are stable chunk boundaries, and every entry includes:
+
+- a stable ID
+- a short description
+- one TypeScript example
+- one Python example
+- candidate lint or static-analysis rules
+
+Non-guidance headings such as bibliographies and generic conclusion sections are intentionally excluded because they do not map to a searchable coding pattern.
+
+For vector database ingestion, prefer `clean-code-patterns.jsonl`. It is generated from the markdown by `build_vector_records.py` and enriches each entry with aliases, problem statements, use/avoid guidance, good and bad examples, lintability, and embedding/display text. The expected record shape is documented in `vector-record.schema.json`.
+
+Suggested vector metadata fields:
+
+- `id`
+- `topic`
+- `language`
+- `title`
+- `description`
+- `lint_candidates`
+# clean-code-tools
