@@ -1,0 +1,55 @@
+{
+  "name": "clean-code-tools",
+  "version": "1.0.0",
+  "description": "Clean-code pattern corpus and lint tooling.",
+  "type": "module",
+  "main": "src/eslint-plugin-clean-code.mjs",
+  "exports": {
+    ".": "./src/eslint-plugin-clean-code.mjs",
+    "./eslint-plugin": "./src/eslint-plugin-clean-code.mjs",
+    "./configs/eslint.clean-code.recommended.mjs": "./configs/eslint.clean-code.recommended.mjs",
+    "./configs/python.clean-code.pyproject.toml": "./configs/python.clean-code.pyproject.toml"
+  },
+  "files": [
+    "configs/",
+    "docs/",
+    "sample-apps/",
+    "scripts/",
+    "src/",
+    "README.md",
+    "package.json"
+  ],
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:eslint-plugin": "node --test tests/eslint-plugin-clean-code.test.mjs",
+    "check:python-config": "python3 scripts/check_python_config.py",
+    "check:sample-apps": "python3 scripts/check_sample_apps.py",
+    "check": "node --check src/eslint-plugin-clean-code.mjs && node --check configs/eslint.clean-code.recommended.mjs && npm test && npm run check:python-config && npm run check:sample-apps"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": "^22.13.0 || >=24"
+  },
+  "peerDependencies": {
+    "@eslint/js": "^10.0.0",
+    "eslint": "^10.4.0",
+    "eslint-plugin-sonarjs": "^4.0.0",
+    "eslint-plugin-unicorn": "^69.0.0",
+    "typescript-eslint": "^8.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^10.6.0",
+    "eslint-plugin-sonarjs": "^4.1.0",
+    "eslint-plugin-unicorn": "^69.0.0",
+    "typescript": "^5.0.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CleanCodePatternVectorRecord",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "topic",
+    "rule_family",
+    "aliases",
+    "problem",
+    "use_when",
+    "avoid_when",
+    "good_examples",
+    "bad_examples",
+    "lint_candidates",
+    "lintability",
+    "embedding_text",
+    "display_text",
+    "source"
+  ],
+  "properties": {
+    "id": { "type": "string", "pattern": "^CC-[0-9]{3}$" },
+    "title": { "type": "string", "minLength": 3 },
+    "topic": { "type": "string", "minLength": 3 },
+    "rule_family": { "type": "string", "minLength": 3 },
+    "aliases": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 2 },
+      "minItems": 3,
+      "uniqueItems": true
+    },
+    "problem": { "type": "string", "minLength": 20 },
+    "use_when": { "type": "string", "minLength": 20 },
+    "avoid_when": { "type": "string", "minLength": 20 },
+    "good_examples": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typescript", "python"],
+      "properties": {
+        "typescript": { "type": "string", "minLength": 5 },
+        "python": { "type": "string", "minLength": 5 }
+      }
+    },
+    "bad_examples": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typescript", "python"],
+      "properties": {
+        "typescript": { "type": "string", "minLength": 5 },
+        "python": { "type": "string", "minLength": 5 }
+      }
+    },
+    "lint_candidates": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 10 },
+      "minItems": 1
+    },
+    "lintability": {
+      "type": "string",
+      "enum": ["high", "medium", "low", "review_only"]
+    },
+    "embedding_text": { "type": "string", "minLength": 300 },
+    "display_text": { "type": "string", "minLength": 300 },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "version"],
+      "properties": {
+        "kind": { "type": "string" },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}
+

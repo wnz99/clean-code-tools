@@ -1,0 +1,18 @@
+{
+  "name": "sample-ts-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint:clean": "eslint src/CleanWidget.tsx --max-warnings 0",
+    "lint:smelly": "eslint src/SmellyWidget.tsx"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "clean-code-tools": "file:../..",
+    "eslint": "^10.4.0",
+    "eslint-plugin-sonarjs": "^4.0.0",
+    "eslint-plugin-unicorn": "^69.0.0",
+    "typescript": "^5.0.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}

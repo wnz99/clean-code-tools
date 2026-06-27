@@ -1,0 +1,132 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+  ".git",
+  ".mypy_cache",
+  ".nox",
+  ".ruff_cache",
+  ".tox",
+  ".venv",
+  "__pycache__",
+  "build",
+  "dist",
+]
+
+[tool.ruff.lint]
+# Ruff owns fast, mostly local checks: correctness, imports, upgrade safety,
+# argument hygiene, commented code, TODO shape, return flow, and simple
+# readability smells. Pylint owns broader design thresholds below.
+select = [
+  "E",
+  "F",
+  "I",
+  "UP",
+  "B",
+  "C4",
+  "SIM",
+  "RET",
+  "ARG",
+  "ERA",
+  "TD",
+  "PLR2004",
+  "RUF",
+]
+ignore = [
+  # Formatter-compatible defaults.
+  "E501",
+
+  # Keep TODO enforcement useful but not hostile to teams that track work in
+  # project-specific systems. TD002/TD003 still require author/issue context.
+  "TD001",
+]
+fixable = [
+  "E",
+  "F",
+  "I",
+  "UP",
+  "B",
+  "C4",
+  "SIM",
+  "RET",
+  "ARG",
+  "RUF",
+]
+unfixable = [
+  "ERA",
+  "TD",
+  "PLR2004",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = []
+combine-as-imports = true
+split-on-trailing-comma = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+  "ARG001",
+  "ARG002",
+  "PLR2004",
+  "S101",
+]
+"**/__init__.py" = [
+  "F401",
+]
+
+[tool.pylint.main]
+py-version = "3.11"
+jobs = 0
+recursive = true
+ignore-paths = [
+  "^\\.venv/.*$",
+  "^build/.*$",
+  "^dist/.*$",
+]
+
+[tool.pylint."messages control"]
+# Let Ruff own these categories to avoid duplicate reports. Pylint remains
+# focused on design pressure, dependency shape, and semantic review signals.
+disable = [
+  "all",
+]
+enable = [
+  "cyclic-import",
+  "duplicate-code",
+  "import-error",
+  "too-many-ancestors",
+  "too-many-arguments",
+  "too-many-branches",
+  "too-many-instance-attributes",
+  "too-many-lines",
+  "too-many-locals",
+  "too-many-nested-blocks",
+  "too-many-public-methods",
+  "too-many-return-statements",
+  "too-many-statements",
+  "too-many-boolean-expressions",
+  "too-few-public-methods",
+]
+
+[tool.pylint.design]
+max-args = 5
+max-attributes = 8
+max-bool-expr = 5
+max-branches = 12
+max-locals = 15
+max-nested-blocks = 4
+max-public-methods = 20
+max-returns = 6
+max-statements = 50
+max-parents = 7
+min-public-methods = 1
+
+[tool.pylint.format]
+max-line-length = 100
+max-module-lines = 1000
+
+[tool.pylint.imports]
+allow-any-import-level = []
+
+[tool.pylint.reports]
+score = false
