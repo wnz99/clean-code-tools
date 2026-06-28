@@ -40,7 +40,7 @@ jobs:
           git merge-base --is-ancestor "$TAG" HEAD
       - run: bun run check
       - name: Publish npm package
-        run: npm publish --tag latest --provenance
+        run: npm publish --tag latest
       - name: Build Python package
         run: uv build
       - name: Publish Python package

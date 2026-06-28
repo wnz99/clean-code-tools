@@ -23,7 +23,7 @@ Before publishing:
 
 ```bash
 bun run check:packages
-npm publish --dry-run --provenance
+npm publish --dry-run
 ```
 
 The package must not set `private: true`; otherwise npm refuses publication. The
@@ -34,6 +34,8 @@ files:
 - `.github/workflows/publish-main.yml`
 
 The workflows use Node 24 so the bundled npm supports trusted publishing.
+npm provenance can be re-enabled with `--provenance` if this repository is
+public; npm rejects provenance for private GitHub repositories.
 
 ## Python / Pylint
 
@@ -113,7 +115,7 @@ Use SemVer for both registries:
 
 ## References
 
-- npm publishing and provenance:
+- npm publishing and trusted publishing:
   <https://docs.github.com/en/actions/tutorials/publish-packages/publish-nodejs-packages>
 - npm package versions are immutable after publish:
   <https://docs.npmjs.com/cli/v11/commands/npm-publish/>
