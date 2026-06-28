@@ -17,7 +17,6 @@ The npm package exposes:
 - `clean-code-tools`
 - `clean-code-tools/eslint-plugin`
 - `clean-code-tools/configs/eslint.clean-code.recommended.mjs`
-- `clean-code-tools/configs/python.clean-code.pyproject.toml`
 
 Before publishing:
 

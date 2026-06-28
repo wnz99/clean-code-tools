@@ -1,6 +1,6 @@
 {
   "name": "clean-code-tools",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Clean-code pattern corpus and lint tooling.",
   "type": "module",
   "packageManager": "bun@1.3.13",
@@ -16,26 +16,11 @@
   "exports": {
     ".": "./src/js/eslint-plugin-clean-code.mjs",
     "./eslint-plugin": "./src/js/eslint-plugin-clean-code.mjs",
-    "./configs/eslint.clean-code.recommended.mjs": "./configs/eslint.clean-code.recommended.mjs",
-    "./configs/python.clean-code.pyproject.toml": "./configs/python.clean-code.pyproject.toml"
+    "./configs/eslint.clean-code.recommended.mjs": "./configs/eslint.clean-code.recommended.mjs"
   },
   "files": [
-    "configs/",
-    "docs/",
-    "evals/",
-    "data/",
-    "pyproject.toml",
-    "uv.lock",
-    "sample-apps/",
-    "scripts/*.py",
-    "skills/",
-    "ops/",
-    "src/python/clean_code_tools_pylint/*.py",
-    "src/js/eslint-plugin-clean-code.mjs",
-    "src/python/mcp_server/*.py",
-    "src/python/mcp_server/utils/*.py",
-    "README.md",
-    "package.json"
+    "configs/eslint.clean-code.recommended.mjs",
+    "src/js/eslint-plugin-clean-code.mjs"
   ],
   "directories": {
     "doc": "docs"

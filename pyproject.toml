@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clean-code-tools-python"
-version = "1.0.4"
+version = "1.0.5"
 description = "Python clean-code lint plugin and recommended Ruff/Pylint config."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -46,6 +46,27 @@ packages = ["src/python/clean_code_tools_pylint"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "configs/python.clean-code.pyproject.toml" = "clean_code_tools_pylint/configs/python.clean-code.pyproject.toml"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "README.md",
+  "pyproject.toml",
+  "configs/python.clean-code.pyproject.toml",
+  "src/python/clean_code_tools_pylint/*.py",
+]
+exclude = [
+  ".github",
+  "data",
+  "docs",
+  "evals",
+  "ops",
+  "sample-apps",
+  "scripts",
+  "skills",
+  "src/js",
+  "src/python/mcp_server",
+  "tests",
+]
 
 [tool.ruff]
 target-version = "py312"

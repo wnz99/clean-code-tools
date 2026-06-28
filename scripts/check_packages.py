@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tarfile
 import tempfile
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,17 +47,32 @@ def check_npm_package() -> None:
     required_files = {
         "src/js/eslint-plugin-clean-code.mjs",
         "configs/eslint.clean-code.recommended.mjs",
-        "configs/python.clean-code.pyproject.toml",
-        "data/clean-code-patterns.jsonl",
-        "data/vector-record.schema.json",
-        "src/python/clean_code_tools_pylint/__init__.py",
-        "src/python/clean_code_tools_pylint/ast_checker.py",
-        "src/python/clean_code_tools_pylint/comments.py",
-        "src/python/clean_code_tools_pylint/helpers.py",
     }
     missing_files = sorted(required_files - package_files)
     if missing_files:
         raise SystemExit(f"npm package missing files: {', '.join(missing_files)}")
+    forbidden_prefixes = (
+        "data/",
+        "docs/",
+        "evals/",
+        "ops/",
+        "sample-apps/",
+        "scripts/",
+        "skills/",
+        "src/python/",
+    )
+    forbidden_files = {
+        "pyproject.toml",
+        "uv.lock",
+        "configs/python.clean-code.pyproject.toml",
+    }
+    unexpected_files = sorted(
+        path
+        for path in package_files
+        if path in forbidden_files or path.startswith(forbidden_prefixes)
+    )
+    if unexpected_files:
+        raise SystemExit(f"npm package includes non-runtime files: {', '.join(unexpected_files)}")
 
 
 def check_version_parity() -> None:
@@ -72,6 +89,41 @@ def check_version_parity() -> None:
     raise SystemExit(
         f"Package versions must match for dual publishing: npm={npm_version}, python={python_version}"
     )
+
+
+def wheel_files(path: Path) -> set[str]:
+    with zipfile.ZipFile(path) as archive:
+        return set(archive.namelist())
+
+
+def sdist_files(path: Path) -> set[str]:
+    with tarfile.open(path) as archive:
+        files = set()
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            parts = Path(member.name).parts
+            files.add(str(Path(*parts[1:])))
+        return files
+
+
+def assert_no_forbidden_files(
+    *,
+    artifact_name: str,
+    package_files: set[str],
+    forbidden_prefixes: tuple[str, ...],
+    forbidden_files: set[str] | None = None,
+) -> None:
+    forbidden_files = forbidden_files or set()
+    unexpected_files = sorted(
+        path
+        for path in package_files
+        if path in forbidden_files or path.startswith(forbidden_prefixes)
+    )
+    if unexpected_files:
+        raise SystemExit(
+            f"{artifact_name} includes non-runtime files: {', '.join(unexpected_files)}"
+        )
 
 
 def venv_executable(venv: Path, executable: str) -> Path:
@@ -91,10 +143,73 @@ def check_python_package() -> None:
     with tempfile.TemporaryDirectory(prefix="clean-code-package-") as raw_tmp:
         tmp = Path(raw_tmp)
         dist = tmp / "dist"
-        run(["uv", "build", "--wheel", "--out-dir", str(dist)])
+        run(["uv", "build", "--out-dir", str(dist)])
         wheels = sorted(dist.glob("clean_code_tools_python-*.whl"))
         if not wheels:
             raise SystemExit("Expected uv build to create a clean-code-tools-python wheel")
+        sdists = sorted(dist.glob("clean_code_tools_python-*.tar.gz"))
+        if not sdists:
+            raise SystemExit("Expected uv build to create a clean-code-tools-python sdist")
+
+        wheel_package_files = wheel_files(wheels[-1])
+        required_wheel_files = {
+            "clean_code_tools_pylint/__init__.py",
+            "clean_code_tools_pylint/ast_checker.py",
+            "clean_code_tools_pylint/comments.py",
+            "clean_code_tools_pylint/helpers.py",
+            "clean_code_tools_pylint/configs/python.clean-code.pyproject.toml",
+        }
+        missing_wheel_files = sorted(required_wheel_files - wheel_package_files)
+        if missing_wheel_files:
+            raise SystemExit(f"Python wheel missing files: {', '.join(missing_wheel_files)}")
+        assert_no_forbidden_files(
+            artifact_name="Python wheel",
+            package_files=wheel_package_files,
+            forbidden_prefixes=(
+                "data/",
+                "docs/",
+                "evals/",
+                "ops/",
+                "sample-apps/",
+                "scripts/",
+                "skills/",
+                "src/",
+                "tests/",
+            ),
+            forbidden_files={"uv.lock", "package.json", "bun.lock"},
+        )
+
+        sdist_package_files = sdist_files(sdists[-1])
+        required_sdist_files = {
+            "README.md",
+            "pyproject.toml",
+            "configs/python.clean-code.pyproject.toml",
+            "src/python/clean_code_tools_pylint/__init__.py",
+            "src/python/clean_code_tools_pylint/ast_checker.py",
+            "src/python/clean_code_tools_pylint/comments.py",
+            "src/python/clean_code_tools_pylint/helpers.py",
+        }
+        missing_sdist_files = sorted(required_sdist_files - sdist_package_files)
+        if missing_sdist_files:
+            raise SystemExit(f"Python sdist missing files: {', '.join(missing_sdist_files)}")
+        assert_no_forbidden_files(
+            artifact_name="Python sdist",
+            package_files=sdist_package_files,
+            forbidden_prefixes=(
+                ".github/",
+                "data/",
+                "docs/",
+                "evals/",
+                "ops/",
+                "sample-apps/",
+                "scripts/",
+                "skills/",
+                "src/js/",
+                "src/python/mcp_server/",
+                "tests/",
+            ),
+            forbidden_files={"uv.lock", "package.json", "bun.lock"},
+        )
 
         venv = tmp / ".venv"
         run([sys.executable, "-m", "venv", str(venv)])
