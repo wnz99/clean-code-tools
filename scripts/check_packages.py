@@ -25,9 +25,23 @@ def run(command: list[str], *, cwd: Path = ROOT, check: bool = True) -> subproce
     return completed
 
 
+def npm_pack_payload(output: str) -> list[dict[str, object]]:
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError:
+        start = output.find("[")
+        end = output.rfind("]")
+        if start == -1 or end == -1 or end <= start:
+            raise SystemExit(f"Could not parse npm pack JSON output:\n{output}") from None
+        payload = json.loads(output[start : end + 1])
+    if not isinstance(payload, list) or not payload:
+        raise SystemExit(f"Expected npm pack JSON array, got:\n{output}")
+    return payload
+
+
 def check_npm_package() -> None:
     packed = run(["npm", "pack", "--dry-run", "--json"]).stdout
-    package_files = {item["path"] for item in json.loads(packed)[0]["files"]}
+    package_files = {item["path"] for item in npm_pack_payload(packed)[0]["files"]}
     required_files = {
         "src/js/eslint-plugin-clean-code.mjs",
         "configs/eslint.clean-code.recommended.mjs",
