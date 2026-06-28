@@ -216,6 +216,15 @@ split-on-trailing-comma = true
   "T201",
   "TRY003",
 ]
+"skills/clean-code-mcp-reviewer/runtime/scripts/docker_init_weaviate.py" = [
+  "S603",
+  "T201",
+  "TRY003",
+]
+"skills/clean-code-mcp-reviewer/runtime/scripts/docker_mcp_server.py" = [
+  "S104",
+  "S603",
+]
 "scripts/weaviate_ingest_clean_code.py" = [
   "TRY003",
 ]

@@ -83,6 +83,57 @@ After applying, run the repo's normal lint/test commands. If the new static
 rules produce maintainability candidates, use the MCP workflow below to decide
 which findings deserve refactors.
 
+## Installing The Local MCP Runtime
+
+When the user wants the clean-code MCP to run on a host system without installing
+Python dependencies directly, use the bundled Docker runtime. It includes:
+
+- `Dockerfile`: builds the clean-code MCP image
+- `compose.yaml`: runs Weaviate plus the MCP HTTP server
+- `runtime/`: bundled MCP server source, ingest script, and clean-code corpus
+
+Plan the runtime install from the target repo or host folder:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --mcp-runtime
+```
+
+Apply after the user accepts the plan:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --mcp-runtime --apply
+```
+
+This creates `.clean-code-mcp/` in the target folder. To build and start
+Weaviate plus the MCP server in one step, use:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --start-mcp-runtime --apply
+```
+
+The stack exposes:
+
+- Weaviate HTTP: `http://127.0.0.1:8080`
+- Weaviate gRPC: `127.0.0.1:50051`
+- Clean-code MCP HTTP: `http://127.0.0.1:8765`
+
+The Compose stack has an explicit initialization service. `docker compose up
+--build` builds the MCP image, starts Weaviate, runs `clean-code-mcp-init` to
+ingest the bundled corpus into the Weaviate volume, and starts the FastMCP HTTP
+server only after initialization succeeds. Use `CLEAN_CODE_MCP_RESET_WEAVIATE=false`
+if preserving the existing Weaviate collection matters. Use
+`WEAVIATE_HTTP_PORT`, `WEAVIATE_GRPC_PORT`, and `CLEAN_CODE_MCP_PORT` when
+default ports are occupied.
+
+Manual commands after copy-only install:
+
+```bash
+docker compose -f .clean-code-mcp/compose.yaml up --build -d
+docker compose -f .clean-code-mcp/compose.yaml logs clean-code-mcp-init
+docker compose -f .clean-code-mcp/compose.yaml logs -f clean-code-mcp
+docker compose -f .clean-code-mcp/compose.yaml down
+```
+
 ## Refactor Discipline
 
 - Read formatter, linter, type-checker, framework, tests, and nearby files

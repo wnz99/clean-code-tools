@@ -11,6 +11,13 @@ from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 PYTHON_TEMPLATE = SKILL_ROOT / "templates" / "python.clean-code.pyproject.toml"
+MCP_RUNTIME_FILES = (
+    SKILL_ROOT / ".dockerignore",
+    SKILL_ROOT / "Dockerfile",
+    SKILL_ROOT / "compose.yaml",
+    SKILL_ROOT / "runtime",
+)
+MCP_RUNTIME_TARGET = ".clean-code-mcp"
 
 JS_DEV_PACKAGES = [
     "clean-code-tools",
@@ -235,15 +242,42 @@ def plan_python(repo: Path, plan: Plan) -> None:
     )
 
 
-def build_plan(repo: Path, *, allow_dirty: bool) -> Plan:
+def build_plan(repo: Path, *, allow_dirty: bool, require_languages: bool = True) -> Plan:
     plan = Plan(repo=repo)
     if is_git_dirty(repo) and not allow_dirty:
         plan.blockers.append("Git worktree is dirty. Commit/stash first or rerun with --allow-dirty.")
     plan_js(repo, plan)
     plan_python(repo, plan)
-    if not plan.languages:
+    if require_languages and not plan.languages:
         plan.blockers.append("No JavaScript/TypeScript or Python project files were detected.")
     return plan
+
+
+def plan_mcp_runtime(repo: Path, plan: Plan, *, start: bool) -> None:
+    if shutil.which("docker") is None:
+        plan.blockers.append("Docker is required for the bundled MCP runtime but was not found.")
+    target = repo / MCP_RUNTIME_TARGET
+    if target.exists():
+        plan.blockers.append(f"{MCP_RUNTIME_TARGET} already exists. Remove it or merge the runtime manually.")
+        return
+    plan.changes.append(
+        Change(
+            f"create {MCP_RUNTIME_TARGET}/",
+            "Copy the bundled Dockerfile, Compose file, MCP server runtime, and clean-code corpus.",
+        )
+    )
+    if start:
+        plan.commands.append(
+            [
+                "docker",
+                "compose",
+                "-f",
+                f"{MCP_RUNTIME_TARGET}/compose.yaml",
+                "up",
+                "--build",
+                "-d",
+            ]
+        )
 
 
 def add_clean_code_to_eslint_array(text: str) -> str:
@@ -292,6 +326,17 @@ def apply_plan(plan: Plan, *, skip_install: bool) -> None:
         run(command, cwd=plan.repo)
 
 
+def apply_mcp_runtime(repo: Path) -> None:
+    target = repo / MCP_RUNTIME_TARGET
+    target.mkdir()
+    for source in MCP_RUNTIME_FILES:
+        destination = target / source.name
+        if source.is_dir():
+            shutil.copytree(source, destination)
+        else:
+            shutil.copy2(source, destination)
+
+
 def print_plan(plan: Plan) -> None:
     print(f"repo: {plan.repo}")
     print(f"languages: {', '.join(plan.languages) if plan.languages else 'none'}")
@@ -322,16 +367,31 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true", help="Apply safe changes and install packages.")
     parser.add_argument("--allow-dirty", action="store_true", help="Allow applying with a dirty git worktree.")
     parser.add_argument("--skip-install", action="store_true", help="Modify files without running package installers.")
+    parser.add_argument(
+        "--mcp-runtime",
+        action="store_true",
+        help=f"Also copy the Dockerized MCP runtime into {MCP_RUNTIME_TARGET}/.",
+    )
+    parser.add_argument(
+        "--start-mcp-runtime",
+        action="store_true",
+        help="After applying, run the Dockerized Weaviate + MCP stack.",
+    )
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
     if not repo.exists():
         raise SystemExit(f"Repo does not exist: {repo}")
-    plan = build_plan(repo, allow_dirty=args.allow_dirty)
+    wants_mcp_runtime = args.mcp_runtime or args.start_mcp_runtime
+    plan = build_plan(repo, allow_dirty=args.allow_dirty, require_languages=not wants_mcp_runtime)
+    if wants_mcp_runtime:
+        plan_mcp_runtime(repo, plan, start=args.start_mcp_runtime)
     print_plan(plan)
     if args.apply:
         if not plan.can_apply:
             raise SystemExit(1)
+        if wants_mcp_runtime:
+            apply_mcp_runtime(repo)
         apply_plan(plan, skip_install=args.skip_install)
         print("\napplied: clean-code lint configuration updated")
 

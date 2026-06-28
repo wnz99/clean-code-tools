@@ -30,6 +30,11 @@
       "id": 6,
       "prompt": "Install the clean-code lint rules in this existing repo. It has package.json, eslint.config.mjs, pyproject.toml, and both TypeScript and Python source files. Explain what will be changed before applying anything, and stop if an existing lint config is too complex to rewrite safely.",
       "expected_output": "The agent uses the bundled install_clean_code_linting.py dry-run first, reports detected languages, install commands, planned config edits, and blockers, then applies only safe changes after explicit approval."
+    },
+    {
+      "id": 7,
+      "prompt": "Set up the clean-code MCP locally for this repo, but do not install Python dependencies directly on the host. Use Docker if the skill provides a runtime.",
+      "expected_output": "The agent plans the bundled Docker MCP runtime install, explains that it will create .clean-code-mcp with Dockerfile, compose.yaml, runtime source, and corpus, then uses --mcp-runtime or --start-mcp-runtime only after approval."
     }
   ]
 }
