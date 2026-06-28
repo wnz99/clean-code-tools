@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clean-code-tools-python"
-version = "1.0.5"
+version = "1.0.6"
 description = "Python clean-code lint plugin and recommended Ruff/Pylint config."
 readme = "README.md"
 requires-python = ">=3.12"
