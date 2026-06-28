@@ -17,6 +17,7 @@ keywords = [
   "static-analysis",
 ]
 dependencies = [
+  "astroid>=4.0.4",
   "pylint>=4.0.0",
   "ruff>=0.15.0",
 ]
@@ -31,6 +32,7 @@ Documentation = "https://github.com/wnz99/clean-code-tools/tree/main/docs"
 lint = [
   "ruff>=0.15.0",
   "pylint>=4.0.0",
+  "deptry>=0.25.1",
 ]
 mcp = [
   "fastembed>=0.8.0",
@@ -256,6 +258,28 @@ split-on-trailing-comma = true
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
+
+[tool.deptry]
+known_first_party = [
+  "_mcp_app",
+  "clean_code_eslint_triggers",
+  "clean_code_python_triggers",
+  "clean_code_review_candidates",
+  "clean_code_review_io",
+  "clean_code_review_models",
+  "clean_code_trigger_catalog",
+  "mcp_server",
+]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = [
+  "ruff",
+]
+DEP004 = [
+  "fastembed",
+  "fastmcp",
+  "httpx",
+]
 
 [tool.pylint.main]
 py-version = "3.12"

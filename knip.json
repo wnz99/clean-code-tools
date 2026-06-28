@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "tests/**/*.test.mjs"
+  ],
+  "project": [
+    "src/js/**/*.mjs",
+    "configs/**/*.mjs",
+    "tests/**/*.mjs",
+    "!sample-apps/**"
+  ],
+  "ignoreBinaries": ["uv"]
+}

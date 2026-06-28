@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "src/js/eslint-plugin-clean-code.mjs",
+    "configs/eslint.clean-code.recommended.mjs",
+    "tests/**/*.test.mjs"
+  ],
+  "ignorePatterns": [
+    ".codex/**",
+    ".venv/**",
+    "build/**",
+    "dist/**",
+    "node_modules/**",
+    "sample-apps/**"
+  ],
+  "rules": {
+    "unused-dev-dependencies": "warn"
+  }
+}

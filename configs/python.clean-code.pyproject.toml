@@ -141,3 +141,11 @@ allow-any-import-level = []
 
 [tool.pylint.reports]
 score = false
+
+[tool.deptry]
+known_first_party = []
+
+[tool.deptry.per_rule_ignores]
+DEP002 = [
+  "ruff",
+]

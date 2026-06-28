@@ -262,6 +262,10 @@ def print_feedback(findings: list[Finding], *, hook_name: str, limit: int, block
         print("Blocking mode is enabled. Review or bypass intentionally with CLEAN_CODE_AGENT_HOOK_MODE=advisory.")
 
 
+def include_pylint() -> bool:
+    return os.environ.get("CLEAN_CODE_AGENT_HOOK_PYLINT", "0").lower() in {"1", "true", "yes"}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Emit clean-code feedback for local Git hooks.")
     parser.add_argument("--hook", default="git-hook")
@@ -274,8 +278,9 @@ def main() -> None:
     findings = [
         *eslint_findings(repo, timeout=args.timeout),
         *ruff_findings(repo, timeout=args.timeout),
-        *pylint_findings(repo, timeout=args.timeout),
     ]
+    if include_pylint():
+        findings.extend(pylint_findings(repo, timeout=args.timeout))
     print_feedback(findings, hook_name=args.hook, limit=args.limit, blocking=args.mode == "blocking")
     if findings and args.mode == "blocking":
         raise SystemExit(1)

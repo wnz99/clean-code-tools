@@ -11,6 +11,8 @@ from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 PYTHON_TEMPLATE = SKILL_ROOT / "templates" / "python.clean-code.pyproject.toml"
+KNIP_CONFIG_NAME = "knip.json"
+FALLOW_CONFIG_NAME = ".fallowrc.json"
 MCP_RUNTIME_FILES = (
     SKILL_ROOT / ".dockerignore",
     SKILL_ROOT / "Dockerfile",
@@ -24,6 +26,7 @@ HOOK_SCRIPT_NAME = "clean_code_agent_feedback.py"
 HOOK_CATALOG_NAME = "clean_code_review_triggers.json"
 HOOK_MARKER = "# clean-code-mcp-reviewer hook"
 HOOK_CHOICES = ("ask", "none", "pre-commit", "pre-push", "both")
+RECOMMENDED_HOOK_CHOICE = "pre-push"
 
 JS_DEV_PACKAGES = [
     "clean-code-tools",
@@ -32,14 +35,56 @@ JS_DEV_PACKAGES = [
     "typescript-eslint",
     "eslint-plugin-sonarjs",
     "eslint-plugin-unicorn",
+    "knip",
+    "fallow",
 ]
-PYTHON_DEV_PACKAGES = ["clean-code-tools-python"]
+PYTHON_DEV_PACKAGES = ["clean-code-tools-python", "deptry"]
 ESLINT_CONFIG_NAMES = [
     "eslint.config.mjs",
     "eslint.config.js",
     "eslint.config.cjs",
     "eslint.config.ts",
 ]
+
+PACKAGE_CHECK_SCRIPTS = {
+    "check:knip": "knip --no-progress --no-config-hints",
+    "check:fallow": "fallow dead-code --summary --quiet && fallow dupes --summary --quiet",
+    "inspect:fallow-health": "fallow health --format compact || true",
+}
+
+KNIP_CONFIG = {
+    "$schema": "https://unpkg.com/knip@6/schema.json",
+    "entry": ["tests/**/*.test.{js,mjs,cjs,ts,tsx}"],
+    "project": [
+        "src/**/*.{js,mjs,cjs,ts,tsx}",
+        "tests/**/*.{js,mjs,cjs,ts,tsx}",
+        "configs/**/*.{js,mjs,cjs,ts}",
+    ],
+    "ignoreBinaries": ["uv"],
+}
+
+FALLOW_CONFIG = {
+    "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+    "ignorePatterns": [
+        ".codex/**",
+        ".venv/**",
+        "build/**",
+        "dist/**",
+        "node_modules/**",
+    ],
+    "rules": {
+        "unused-dev-dependencies": "warn",
+    },
+}
+
+DEPTRY_CONFIG = """[tool.deptry]
+known_first_party = []
+
+[tool.deptry.per_rule_ignores]
+DEP002 = [
+  "ruff",
+]
+"""
 
 
 @dataclass
@@ -154,6 +199,17 @@ def package_json_scripts(repo: Path) -> dict[str, object]:
     return scripts if isinstance(scripts, dict) else {}
 
 
+def package_json(repo: Path) -> dict[str, object]:
+    package_json_path = repo / "package.json"
+    if not package_json_path.exists():
+        return {}
+    try:
+        payload = json.loads(package_json_path.read_text())
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def eslint_config(repo: Path) -> Path | None:
     for name in ESLINT_CONFIG_NAMES:
         path = repo / name
@@ -180,6 +236,29 @@ def plan_js(repo: Path, plan: Plan) -> None:
     scripts = package_json_scripts(repo)
     if not scripts:
         plan.warnings.append("No package.json scripts found; add a lint script after install if desired.")
+    missing_scripts = [name for name in PACKAGE_CHECK_SCRIPTS if name not in scripts]
+    if missing_scripts:
+        plan.changes.append(
+            Change(
+                "update package.json clean-code check scripts",
+                "Add Knip/Fallow scripts for dependency, dead-code, duplication, and advisory health checks.",
+            )
+        )
+
+    if not (repo / KNIP_CONFIG_NAME).exists():
+        plan.changes.append(
+            Change(
+                f"create {KNIP_CONFIG_NAME}",
+                "Configure Knip to check JS/TS unused files, exports, binaries, and dependencies.",
+            )
+        )
+    if not (repo / FALLOW_CONFIG_NAME).exists():
+        plan.changes.append(
+            Change(
+                f"create {FALLOW_CONFIG_NAME}",
+                "Configure Fallow dead-code and duplication checks with common generated/vendor ignores.",
+            )
+        )
 
     config = eslint_config(repo)
     if config is None:
@@ -217,6 +296,10 @@ def plan_js(repo: Path, plan: Plan) -> None:
 
 def pyproject_has_clean_code(text: str) -> bool:
     return "clean_code_tools_pylint" in text and "clean-code-todo-format" in text
+
+
+def pyproject_has_deptry(text: str) -> bool:
+    return "[tool.deptry]" in text
 
 
 def pyproject_has_lint_sections(text: str) -> bool:
@@ -259,6 +342,13 @@ def plan_python(repo: Path, plan: Plan) -> None:
         return
 
     text = pyproject.read_text()
+    if not pyproject_has_deptry(text):
+        plan.changes.append(
+            Change(
+                "append pyproject.toml deptry section",
+                "Configure deptry for Python dependency hygiene checks.",
+            )
+        )
     if pyproject_has_clean_code(text):
         plan.changes.append(Change("python lint already configured", "pyproject.toml already loads clean-code rules."))
         return
@@ -337,13 +427,14 @@ def selected_hooks(choice: str) -> tuple[str, ...]:
 def prompt_hook_choice() -> str:
     print("\nInstall clean-code agent feedback Git hooks?")
     print("  1. no hooks")
-    print("  2. pre-commit only")
-    print("  3. pre-push only")
+    print("  2. pre-push only (recommended)")
+    print("  3. pre-commit only")
     print("  4. both pre-commit and pre-push")
-    answer = input("Choose [1-4, default 1]: ").strip()
+    answer = input("Choose [1-4, default 2]: ").strip()
     return {
-        "2": "pre-commit",
-        "3": "pre-push",
+        "": RECOMMENDED_HOOK_CHOICE,
+        "2": "pre-push",
+        "3": "pre-commit",
         "4": "both",
     }.get(answer, "none")
 
@@ -360,7 +451,7 @@ def plan_git_hooks(repo: Path, plan: Plan, *, choice: str, mode: str) -> None:
     hooks = selected_hooks(choice)
     if not hooks:
         plan.warnings.append(
-            "Git hooks were not selected. Use --git-hooks pre-commit, pre-push, or both to install agent feedback hooks."
+            "Git hooks were not selected. Use --git-hooks pre-push to install the recommended agent feedback hook."
         )
         return
     if not (repo / ".git").exists():
@@ -407,11 +498,41 @@ def apply_js(repo: Path) -> None:
             'import cleanCode from "clean-code-tools/configs/eslint.clean-code.recommended.mjs";\n\n'
             "export default cleanCode;\n"
         )
+        apply_js_quality_config(repo)
         return
     text = config.read_text()
     if "clean-code-tools/configs/eslint.clean-code.recommended.mjs" in text:
+        apply_js_quality_config(repo)
         return
     config.write_text(add_clean_code_to_eslint_array(text))
+    apply_js_quality_config(repo)
+
+
+def apply_js_quality_config(repo: Path) -> None:
+    knip_config = repo / KNIP_CONFIG_NAME
+    if not knip_config.exists():
+        knip_config.write_text(json.dumps(KNIP_CONFIG, indent=2) + "\n")
+
+    fallow_config = repo / FALLOW_CONFIG_NAME
+    if not fallow_config.exists():
+        fallow_config.write_text(json.dumps(FALLOW_CONFIG, indent=2) + "\n")
+
+    package_json_path = repo / "package.json"
+    payload = package_json(repo)
+    if not payload:
+        return
+    scripts = payload.get("scripts")
+    if not isinstance(scripts, dict):
+        scripts = {}
+    changed = False
+    for name, command in PACKAGE_CHECK_SCRIPTS.items():
+        if name not in scripts:
+            scripts[name] = command
+            changed = True
+    if not changed:
+        return
+    payload["scripts"] = scripts
+    package_json_path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
 def apply_python(repo: Path) -> None:
@@ -422,8 +543,15 @@ def apply_python(repo: Path) -> None:
         return
     text = pyproject.read_text()
     if pyproject_has_clean_code(text):
+        pyproject.write_text(ensure_deptry_config(text))
         return
     pyproject.write_text(text.rstrip() + "\n\n" + template)
+
+
+def ensure_deptry_config(text: str) -> str:
+    if pyproject_has_deptry(text):
+        return text
+    return text.rstrip() + "\n\n" + DEPTRY_CONFIG
 
 
 def confirm(action: str, *, assume_yes: bool) -> bool:
