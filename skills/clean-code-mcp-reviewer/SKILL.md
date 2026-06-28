@@ -21,6 +21,68 @@ This skill is self-contained. Do not assume separate language-specific
 clean-code skills are installed. Use the language heuristics below when judging
 Python, JavaScript, TypeScript, or React code.
 
+## Installing Clean-Code Linting
+
+When the user asks to install, configure, adopt, bootstrap, or integrate the
+clean-code lint rules in another repository, use the bundled installer first.
+It makes the static lint layer deterministic and leaves the MCP review layer for
+semantic follow-up on the findings.
+
+Run from the target repository:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py
+```
+
+The default mode is a dry run. It detects JavaScript/TypeScript and Python,
+identifies the package manager or installer, inspects existing ESLint,
+Ruff, and Pylint configuration, and prints:
+
+- languages detected
+- packages that would be installed
+- files that would be created or modified
+- blockers that require a manual integration strategy
+- warnings such as missing lint scripts
+
+Apply only when the plan says `status: safe to apply` and the user has asked to
+proceed:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --apply
+```
+
+Use `--repo /path/to/repo` when the current directory is not the target repo.
+Use `--skip-install` only for dry integration tests or when the user wants file
+changes but will install dependencies separately. Use `--allow-dirty` only when
+the user explicitly accepts applying changes over an uncommitted worktree.
+
+Installer behavior:
+
+- For JavaScript/TypeScript, install `clean-code-tools` plus its ESLint peer
+  dependencies as dev dependencies using the detected package manager
+  (`bun`, `pnpm`, `yarn`, or `npm`).
+- For a repo with no ESLint config, create `eslint.config.mjs` that exports the
+  recommended clean-code preset.
+- For a simple flat ESLint `export default [...]` config, import the preset and
+  spread it at the start of the exported array.
+- For complex ESLint config shapes, CommonJS configs, or framework-specific
+  configs that are not safe to rewrite mechanically, stop and explain the
+  manual integration: import
+  `clean-code-tools/configs/eslint.clean-code.recommended.mjs` and spread
+  `...cleanCode` before local overrides.
+- For Python, install `clean-code-tools-python` as a development dependency
+  using the detected installer (`uv`, `poetry`, or `pip` fallback).
+- For a repo with no `pyproject.toml`, create one with the clean-code Ruff and
+  Pylint sections.
+- For a `pyproject.toml` with no existing Ruff or Pylint sections, append the
+  clean-code lint sections.
+- For existing Ruff or Pylint configuration, stop and recommend a manual merge
+  instead of overwriting local lint policy.
+
+After applying, run the repo's normal lint/test commands. If the new static
+rules produce maintainability candidates, use the MCP workflow below to decide
+which findings deserve refactors.
+
 ## Refactor Discipline
 
 - Read formatter, linter, type-checker, framework, tests, and nearby files

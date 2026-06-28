@@ -211,6 +211,11 @@ split-on-trailing-comma = true
 "scripts/_mcp_app.py" = [
   "TRY003",
 ]
+"skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py" = [
+  "S603",
+  "T201",
+  "TRY003",
+]
 "scripts/weaviate_ingest_clean_code.py" = [
   "TRY003",
 ]

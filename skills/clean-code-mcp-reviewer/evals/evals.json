@@ -25,6 +25,11 @@
       "id": 5,
       "prompt": "Review this generated API client fixture change and decide whether clean-code patterns should block it.\n\n```ts\n// generated from billing-openapi.yaml\nexport const fixture = {\n  account: { owner: { address: { city: \"London\" } } },\n  status: \"active\"\n};\n\nexport const city = fixture.account.owner.address.city;\n```\n\nThe file path is `src/generated/billingClient.fixture.ts`.",
       "expected_output": "The agent recognizes generated/fixture code as a weak-match context and reports no strong clean-code finding unless local project rules say otherwise."
+    },
+    {
+      "id": 6,
+      "prompt": "Install the clean-code lint rules in this existing repo. It has package.json, eslint.config.mjs, pyproject.toml, and both TypeScript and Python source files. Explain what will be changed before applying anything, and stop if an existing lint config is too complex to rewrite safely.",
+      "expected_output": "The agent uses the bundled install_clean_code_linting.py dry-run first, reports detected languages, install commands, planned config edits, and blockers, then applies only safe changes after explicit approval."
     }
   ]
 }
