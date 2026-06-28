@@ -8,11 +8,24 @@ build-backend = "hatchling.build"
 name = "clean-code-tools-python"
 version = "1.0.1"
 description = "Python clean-code lint plugin and recommended Ruff/Pylint config."
+readme = "README.md"
 requires-python = ">=3.12"
+keywords = [
+  "clean-code",
+  "pylint",
+  "ruff",
+  "static-analysis",
+]
 dependencies = [
   "pylint>=4.0.0",
   "ruff>=0.15.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/wnz99/clean-code-tools"
+Repository = "https://github.com/wnz99/clean-code-tools"
+Issues = "https://github.com/wnz99/clean-code-tools/issues"
+Documentation = "https://github.com/wnz99/clean-code-tools/tree/main/docs"
 
 [dependency-groups]
 lint = [
