@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from src.mcp_server.models import Confidence, JsonDict
-from src.mcp_server.text import (
+from mcp_server.models import Confidence, JsonDict
+from mcp_server.text import (
     lexical_score,
     query_tokens,
     searchable_row_text,
     semantic_similarity,
 )
-from src.mcp_server.utils.unique_strings import unique_strings
+from mcp_server.utils.unique_strings import unique_strings
 
 CONSERVATIVE_CONTEXT_THRESHOLD = 0.80
 HIGH_CONFIDENCE_THRESHOLD = 0.72

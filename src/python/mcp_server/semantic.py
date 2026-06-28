@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from src.mcp_server.corpus import (
+from mcp_server.corpus import (
     CHUNK_ID_NAMESPACE,
     MARKDOWN_SOURCES,
     PATTERN_RECORDS,
@@ -13,7 +13,7 @@ from src.mcp_server.corpus import (
     object_id_for,
     pattern_record_chunks,
 )
-from src.mcp_server.markdown import (
+from mcp_server.markdown import (
     CODE_FENCE_RE,
     HEADING_RE,
     MAX_SECTION_TOKENS,
@@ -25,7 +25,7 @@ from src.mcp_server.markdown import (
     semantic_blocks,
     split_section_body,
 )
-from src.mcp_server.models import (
+from mcp_server.models import (
     CHUNKER_VERSION,
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_EMBEDDING_PROVIDER,
@@ -33,13 +33,13 @@ from src.mcp_server.models import (
     Confidence,
     JsonDict,
 )
-from src.mcp_server.ranking import (
+from mcp_server.ranking import (
     local_keyword_rows,
     merge_search_rows,
     rank_pattern_rows,
     search_pattern_records,
 )
-from src.mcp_server.ranking_scoring import (
+from mcp_server.ranking_scoring import (
     BROAD_CATEGORY_QUERY_TERMS,
     CONSERVATIVE_CONTEXT_THRESHOLD,
     EXACT_HIGH_CONFIDENCE_THRESHOLD,
@@ -57,7 +57,7 @@ from src.mcp_server.ranking_scoring import (
     row_matches_filters,
     score_pattern_row,
 )
-from src.mcp_server.text import (
+from mcp_server.text import (
     CC_ID_RE,
     PHRASE_BONUS_MIN_OVERLAP,
     PLURAL_NORMALIZATION_MIN_LENGTH,
@@ -78,10 +78,10 @@ from src.mcp_server.text import (
     slug,
     slugless,
 )
-from src.mcp_server.utils.httpx_loader import require_httpx
-from src.mcp_server.utils.sha256_text import sha256_text
-from src.mcp_server.utils.unique_strings import unique_strings
-from src.mcp_server.weaviate import (
+from mcp_server.utils.httpx_loader import require_httpx
+from mcp_server.utils.sha256_text import sha256_text
+from mcp_server.utils.unique_strings import unique_strings
+from mcp_server.weaviate import (
     COLLECTION_NAME,
     DEFAULT_BATCH_SIZE,
     DEFAULT_WEAVIATE_URL,

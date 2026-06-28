@@ -3,6 +3,62 @@ from __future__ import annotations
 from clean_code_review_models import TriggerRule
 
 PYLINT_TRIGGERS = {
+    "clean-code-boolean-flag-argument": TriggerRule(
+        questions=(
+            "Does the boolean select behavior rather than represent plain data?",
+            "Would intention-revealing functions or an explicit options object make call sites clearer?",
+        ),
+        mcp_query="python boolean flag argument intention revealing functions options object",
+    ),
+    "clean-code-business-policy-literal": TriggerRule(
+        questions=(
+            "Does this literal encode business policy or domain state?",
+            "Would a named constant or typed domain value make changes safer?",
+        ),
+        mcp_query="python business policy literal named constant domain state",
+    ),
+    "clean-code-commented-out-code": TriggerRule(
+        questions=(
+            "Is this commented code obsolete implementation detail?",
+            "Can it be removed in favor of version control history or a tracked task?",
+        ),
+        mcp_query="python commented out code remove obsolete implementation",
+    ),
+    "clean-code-noisy-comment": TriggerRule(
+        questions=(
+            "Is the comment adding constraint/context or just visual noise?",
+            "Would deleting or replacing it with a precise explanation improve scanability?",
+        ),
+        mcp_query="python noisy comments remove visual separators byline comments",
+    ),
+    "clean-code-output-argument-mutation": TriggerRule(
+        questions=(
+            "Is mutation hidden behind an output parameter?",
+            "Would returning a value or copying data make the contract clearer?",
+        ),
+        mcp_query="python output argument mutation return value contract",
+    ),
+    "clean-code-redundant-comment": TriggerRule(
+        questions=(
+            "Does the comment repeat the next line instead of explaining why?",
+            "Can clearer naming or deletion remove the need for the comment?",
+        ),
+        mcp_query="python redundant comment intention revealing code",
+    ),
+    "clean-code-todo-format": TriggerRule(
+        questions=(
+            "Is this TODO actionable and traceable?",
+            "Should the comment include a tracked issue or be converted into code/tests?",
+        ),
+        mcp_query="python todo comment issue id actionable technical debt",
+    ),
+    "clean-code-train-wreck": TriggerRule(
+        questions=(
+            "Is this chain exposing too much object structure to the caller?",
+            "Would a named query/helper or domain method reduce coupling?",
+        ),
+        mcp_query="python train wreck law of demeter object navigation",
+    ),
     "cyclic-import": TriggerRule(
         questions=(
             "Is the cycle exposing a module boundary problem?",

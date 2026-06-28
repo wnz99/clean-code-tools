@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PYTHON_SRC = ROOT / "src" / "python"
 
 
 def run(command: list[str], cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{PYTHON_SRC}:{env.get('PYTHONPATH', '')}".rstrip(":")
     completed = subprocess.run(
         command,
         cwd=cwd,
+        env=env,
         check=False,
         text=True,
         stdout=subprocess.PIPE,
@@ -96,9 +101,13 @@ def check_python_app() -> None:
             if code not in ruff_smelly.stdout:
                 print(ruff_smelly.stdout)
                 raise SystemExit(f"Expected Python smelly Ruff output to include {code}")
-        if "R0913" not in pylint_smelly.stdout:
+        for code in ["R0913", "C9001", "C9002", "C9007"]:
+            if code not in pylint_smelly.stdout:
+                print(pylint_smelly.stdout)
+                raise SystemExit(f"Expected Python smelly Pylint output to include {code}")
+        if "bad-plugin-value" in pylint_smelly.stdout or "unknown-option-value" in pylint_smelly.stdout:
             print(pylint_smelly.stdout)
-            raise SystemExit("Expected Python smelly Pylint output to include R0913")
+            raise SystemExit("Expected Python smelly Pylint plugin to load cleanly")
 
 
 def check_ts_app(app_name: str, clean_script: str, smelly_script: str, expected_rule_ids: list[str]) -> None:
@@ -113,9 +122,9 @@ def check_ts_app(app_name: str, clean_script: str, smelly_script: str, expected_
             isolated_app = tmp / app_name
             isolated_package = package_text.replace('"clean-code-tools": "file:../.."', f'"clean-code-tools": "{tarball}"')
             (isolated_app / "package.json").write_text(isolated_package)
-            run(["npm", "install", "--silent"], cwd=isolated_app)
-            run(["npm", "run", clean_script, "--silent"], cwd=isolated_app)
-            smelly = run(["npm", "run", smelly_script, "--silent"], cwd=isolated_app, check=False)
+            run(["bun", "install"], cwd=isolated_app)
+            run(["bun", "run", clean_script], cwd=isolated_app)
+            smelly = run(["bun", "run", smelly_script], cwd=isolated_app, check=False)
             if smelly.returncode == 0:
                 print(smelly.stdout)
                 raise SystemExit(f"Expected isolated {app_name} smelly script to fail linting")

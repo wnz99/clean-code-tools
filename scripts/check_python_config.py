@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PYTHON_SRC = ROOT / "src" / "python"
 CONFIG = ROOT / "configs" / "python.clean-code.pyproject.toml"
 
 
 def run(command: list[str], cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{PYTHON_SRC}:{env.get('PYTHONPATH', '')}".rstrip(":")
     completed = subprocess.run(
         command,
         cwd=cwd,
+        env=env,
         check=False,
         text=True,
         stdout=subprocess.PIPE,
@@ -98,7 +103,7 @@ def calculate_total(order, include_tax, dry_run, retry, verbose, mode):
         ruff_output = ruff_smelly.stdout
         pylint_output = pylint_smelly.stdout
         required_ruff_codes = ["TD002", "TD003", "ERA001", "ARG001"]
-        required_pylint_codes = ["R0913"]
+        required_pylint_codes = ["R0913", "C9001", "C9002", "C9007"]
         forbidden_codes = ["FIX002", "R0917"]
 
         for code in required_ruff_codes:
@@ -114,6 +119,9 @@ def calculate_total(order, include_tax, dry_run, retry, verbose, mode):
             if code in combined:
                 print(combined)
                 raise SystemExit(f"Did not expect duplicate/noisy code {code}")
+        if "bad-plugin-value" in combined or "unknown-option-value" in combined:
+            print(combined)
+            raise SystemExit("Expected custom Pylint plugin to load cleanly")
 
         print("python_config_check=ok")
 

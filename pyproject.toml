@@ -1,14 +1,17 @@
 #:schema https://json.schemastore.org/pyproject.json
 
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "clean-code-tools-python"
-version = "0.1.0"
-description = "Python tooling for clean-code semantic search and local MCP access."
+version = "1.0.0"
+description = "Python clean-code lint plugin and recommended Ruff/Pylint config."
 requires-python = ">=3.12"
 dependencies = [
-  "fastembed>=0.8.0",
-  "fastmcp>=2.0.0",
-  "httpx>=0.27.0",
+  "pylint>=4.0.0",
+  "ruff>=0.15.0",
 ]
 
 [dependency-groups]
@@ -16,9 +19,20 @@ lint = [
   "ruff>=0.15.0",
   "pylint>=4.0.0",
 ]
+mcp = [
+  "fastembed>=0.8.0",
+  "fastmcp>=2.0.0",
+  "httpx>=0.27.0",
+]
 typecheck = [
   "pyright>=1.1.403",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/python/clean_code_tools_pylint"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"configs/python.clean-code.pyproject.toml" = "clean_code_tools_pylint/configs/python.clean-code.pyproject.toml"
 
 [tool.ruff]
 target-version = "py312"
@@ -145,6 +159,21 @@ split-on-trailing-comma = true
   "FBT002",
   "PLR2004",
 ]
+"scripts/clean_code_eslint_triggers.py" = [
+  "INP001",
+]
+"scripts/clean_code_python_triggers.py" = [
+  "INP001",
+]
+"scripts/clean_code_review_io.py" = [
+  "INP001",
+]
+"scripts/clean_code_review_models.py" = [
+  "INP001",
+]
+"scripts/set_package_versions.py" = [
+  "TRY003",
+]
 "scripts/_mcp_app.py" = [
   "TRY003",
 ]
@@ -154,12 +183,12 @@ split-on-trailing-comma = true
 "scripts/weaviate_search_clean_code.py" = [
   "TRY003",
 ]
-"src/mcp_server/server.py" = [
+"src/python/mcp_server/server.py" = [
   "PLC0415",
   "PLR0913",
   "TRY003",
 ]
-"src/mcp_server/semantic.py" = [
+"src/python/mcp_server/semantic.py" = [
   "PLC0415",
   "TRY003",
 ]
@@ -173,6 +202,9 @@ line-ending = "auto"
 py-version = "3.12"
 jobs = 0
 recursive = true
+load-plugins = [
+  "clean_code_tools_pylint",
+]
 ignore-paths = [
   "^\\.venv/.*$",
   "^build/.*$",
@@ -187,6 +219,14 @@ disable = [
 ]
 enable = [
   "cyclic-import",
+  "clean-code-boolean-flag-argument",
+  "clean-code-business-policy-literal",
+  "clean-code-commented-out-code",
+  "clean-code-noisy-comment",
+  "clean-code-output-argument-mutation",
+  "clean-code-redundant-comment",
+  "clean-code-todo-format",
+  "clean-code-train-wreck",
   "duplicate-code",
   "import-error",
   "too-many-ancestors",
@@ -227,7 +267,8 @@ allow-any-import-level = []
 score = false
 
 [tool.pyright]
-include = ["src/mcp_server", "scripts"]
+include = ["src/python/clean_code_tools_pylint", "src/python/mcp_server", "scripts"]
+extraPaths = ["src/python"]
 exclude = [
   "**/__pycache__",
   "**/.venv",

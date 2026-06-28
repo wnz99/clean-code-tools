@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.mcp_server.models import CleanCodeChunk
-from src.mcp_server.utils.increment import increment
+from mcp_server.models import CleanCodeChunk
+from mcp_server.utils.increment import increment
 
 
 def facet_counts(chunks: list[CleanCodeChunk]) -> dict[str, dict[str, int]]:

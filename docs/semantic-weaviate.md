@@ -6,22 +6,22 @@ This repo uses local Weaviate with self-provided vectors. Weaviate stores chunks
 
 ```bash
 uv sync
-npm run weaviate:dev:start
-npm run weaviate:dev:smoke
+bun run weaviate:dev:start
+bun run weaviate:dev:smoke
 ```
 
 If port `8080` is busy:
 
 ```bash
-WEAVIATE_HTTP_PORT=18080 WEAVIATE_GRPC_PORT=15051 npm run weaviate:dev:start
-WEAVIATE_HTTP_PORT=18080 npm run weaviate:dev:smoke
+WEAVIATE_HTTP_PORT=18080 WEAVIATE_GRPC_PORT=15051 bun run weaviate:dev:start
+WEAVIATE_HTTP_PORT=18080 bun run weaviate:dev:smoke
 ```
 
 ## Ingest
 
 ```bash
-npm run semantic:chunks
-npm run semantic:ingest -- --reset
+bun run semantic:chunks
+bun run semantic:ingest -- --reset
 ```
 
 The default collection is `CleanCodeChunks`. The default embedding model is `BAAI/bge-small-en-v1.5`, running through `fastembed/cpu`.
@@ -29,10 +29,10 @@ The default collection is `CleanCodeChunks`. The default embedding model is `BAA
 ## Search
 
 ```bash
-npm run semantic:search -- "boolean flag argument"
-npm run semantic:search -- "comments that explain bad code"
-npm run semantic:search -- "train wreck deep property chain"
-npm run semantic:search -- "too many function arguments"
+bun run semantic:search -- "boolean flag argument"
+bun run semantic:search -- "comments that explain bad code"
+bun run semantic:search -- "train wreck deep property chain"
+bun run semantic:search -- "too many function arguments"
 ```
 
 Expected useful matches include:
@@ -55,14 +55,14 @@ retrieval layer:
 Run the offline retrieval evals with:
 
 ```bash
-npm run check:retrieval-evals
+bun run check:retrieval-evals
 ```
 
 ## Chunking
 
 The ingestion builds two chunk families:
 
-- `pattern_record`: one chunk per canonical `clean-code-patterns.jsonl` record
+- `pattern_record`: one chunk per canonical `data/clean-code-patterns.jsonl` record
 - `markdown_section`: one chunk per heading section in markdown docs
 
 Markdown parsing is code-fence aware and preserves code blocks with the nearest semantic section. Oversized sections are split by paragraph/code-block groups instead of arbitrary character windows.

@@ -5,14 +5,14 @@ import json
 import uuid
 from pathlib import Path
 
-from src.mcp_server.markdown import (
+from mcp_server.markdown import (
     infer_markdown_rule_family,
     markdown_aliases,
     markdown_sections,
     split_section_body,
 )
-from src.mcp_server.models import CleanCodeChunk, JsonDict
-from src.mcp_server.text import (
+from mcp_server.models import CleanCodeChunk, JsonDict
+from mcp_server.text import (
     clean_alias,
     clean_topic,
     clean_topic_text,
@@ -21,24 +21,23 @@ from src.mcp_server.text import (
     lint_candidates_in_text,
     slug,
 )
-from src.mcp_server.utils.sha256_text import sha256_text
+from mcp_server.utils.sha256_text import sha256_text
 
-ROOT = Path(__file__).resolve().parents[2]
-PATTERN_RECORDS = ROOT / "clean-code-patterns.jsonl"
+ROOT = Path(__file__).resolve().parents[3]
+PATTERN_RECORDS = ROOT / "data" / "clean-code-patterns.jsonl"
 MARKDOWN_SOURCES = (
-    ROOT / "clean-code-examples.md",
     ROOT / "README.md",
-    ROOT / "rag-mcp-design.md",
     ROOT / "docs" / "eslint-custom-rules.md",
     ROOT / "docs" / "eslint-recommended-config.md",
     ROOT / "docs" / "python-lint-recommended-config.md",
-    ROOT / "docs" / "python-ruff-custom-rules-research.md",
+    ROOT / "docs" / "python-pylint-custom-rules.md",
+    ROOT / "docs" / "static-trigger-semantic-review.md",
 )
 CHUNK_ID_NAMESPACE = uuid.UUID("fd1b279f-073e-5aa4-bf70-9f70446a3d8f")
 
 
 def build_chunks(root: Path = ROOT) -> list[CleanCodeChunk]:
-    chunks = [*pattern_record_chunks(root / PATTERN_RECORDS.name)]
+    chunks = [*pattern_record_chunks(root / PATTERN_RECORDS.relative_to(ROOT))]
     for source in MARKDOWN_SOURCES:
         path = root / source.relative_to(ROOT)
         if path.exists():
@@ -107,7 +106,7 @@ def load_pattern_records(path: Path = PATTERN_RECORDS) -> list[JsonDict]:
 
 def get_pattern_record(pattern_id: str, *, root: Path = ROOT) -> JsonDict | None:
     normalized_id = pattern_id.strip().upper()
-    for record in load_pattern_records(root / PATTERN_RECORDS.name):
+    for record in load_pattern_records(root / PATTERN_RECORDS.relative_to(ROOT)):
         if str(record.get("id", "")).upper() == normalized_id:
             return record
     return None

@@ -1,0 +1,53 @@
+name: Version Develop
+
+on:
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version-develop
+  cancel-in-progress: false
+
+jobs:
+  version:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: bun install --frozen-lockfile
+      - name: Bump patch version
+        id: version
+        run: |
+          git fetch --tags
+          LATEST_TAG="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+          if [ -n "$LATEST_TAG" ]; then
+            BASE_VERSION="${LATEST_TAG#v}"
+          else
+            BASE_VERSION="$(bun -p "require('./package.json').version")"
+          fi
+          uv run python scripts/set_package_versions.py --bump patch --base "$BASE_VERSION"
+          VERSION="$(bun -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - run: bun run check
+      - name: Commit version and tag develop
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json pyproject.toml
+          git commit -m "chore: version $VERSION [skip ci]"
+          git tag "v$VERSION"
+          git push origin HEAD:develop
+          git push origin "v$VERSION"

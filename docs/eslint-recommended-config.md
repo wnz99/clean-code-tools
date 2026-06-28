@@ -8,10 +8,10 @@ Use [configs/eslint.clean-code.recommended.mjs](../configs/eslint.clean-code.rec
 
 This preset currently targets Node `^22.13.0 || >=24`, matching the tested ESLint 10/plugin stack.
 
-For this local/private package, install from the workspace path or from a packed tarball:
+Install the npm package with its peer dependencies:
 
 ```bash
-npm install --save-dev /path/to/clean-code-tools eslint @eslint/js typescript-eslint eslint-plugin-sonarjs eslint-plugin-unicorn
+npm install --save-dev clean-code-tools eslint @eslint/js typescript-eslint eslint-plugin-sonarjs eslint-plugin-unicorn
 ```
 
 Then import the preset from the consuming project's `eslint.config.mjs`:

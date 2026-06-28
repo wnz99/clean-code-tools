@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
-import sys
-from pathlib import Path
 from typing import Any
 
-from src.mcp_server.server_payloads import (
+from mcp_server import semantic
+from mcp_server.server_payloads import (
     default_lint_targets,
     facet_counts,
     lint_rule_recommendation,
@@ -16,24 +14,6 @@ from src.mcp_server.server_payloads import (
 )
 
 MAX_SEARCH_LIMIT = 25
-
-
-def load_semantic_module() -> Any:
-    module_name = "clean_code_mcp_semantic"
-    existing = sys.modules.get(module_name)
-    if existing is not None:
-        return existing
-    module_path = Path(__file__).with_name("semantic.py")
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load semantic module from {module_path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-semantic = load_semantic_module()
 COLLECTION_NAME = semantic.COLLECTION_NAME
 DEFAULT_EMBEDDING_MODEL = semantic.DEFAULT_EMBEDDING_MODEL
 DEFAULT_WEAVIATE_URL = semantic.DEFAULT_WEAVIATE_URL

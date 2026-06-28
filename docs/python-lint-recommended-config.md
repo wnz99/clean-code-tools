@@ -5,15 +5,21 @@ Use [configs/python.clean-code.pyproject.toml](../configs/python.clean-code.pypr
 The config intentionally mixes Ruff and Pylint:
 
 - Ruff owns fast local checks: syntax/correctness, imports, bug-prone patterns, simple refactors, commented-out code, TODO shape, unused arguments, return-flow cleanup, magic-value comparisons, and Ruff-specific quality checks.
-- Pylint owns broader design pressure: too many module lines, arguments, locals, branches, returns, statements, nested blocks, public methods, instance attributes, duplicate code, and cyclic imports.
+- Pylint owns broader design pressure: too many module lines, arguments, locals, branches, returns, statements, nested blocks, public methods, instance attributes, duplicate code, cyclic imports, and the custom Python clean-code plugin.
 
 ## Install
 
 ```bash
-python -m pip install "ruff>=0.15.0" "pylint>=4.0.0"
+python -m pip install clean-code-tools-python
 ```
 
 Copy the config into a project root as `pyproject.toml`, or merge its `[tool.ruff]`, `[tool.ruff.lint]`, and `[tool.pylint.*]` sections into an existing `pyproject.toml`.
+
+The Python package installs Ruff, Pylint, and the custom Pylint plugin module
+`clean_code_tools_pylint`. The canonical reusable config is packaged as
+`clean_code_tools_pylint/configs/python.clean-code.pyproject.toml`; this repo
+also keeps a copy at [configs/python.clean-code.pyproject.toml](../configs/python.clean-code.pyproject.toml)
+for local and JavaScript-package consumers.
 
 Run:
 
@@ -34,6 +40,7 @@ pylint .
 | Return-flow cleanup, `CC-237`, `CC-238` adjacent | Ruff `RET`, `SIM` |
 | File, function, and class size pressure, `CC-033..CC-059`, `CC-137..CC-142`, `CC-206` | Pylint `too-many-lines` plus design messages |
 | Duplication and coupling signals, `CC-004`, `CC-160`, `CC-214` | Pylint `duplicate-code`, `cyclic-import` |
+| Custom clean-code gaps matching the TypeScript plugin, `CC-043`, `CC-050`, `CC-068`, `CC-071`, `CC-073`, `CC-080`, `CC-083`, `CC-106`, `CC-107`, `CC-207`, `CC-208`, `CC-224`, `CC-245` | Pylint plugin `clean-code-*` messages |
 
 ## Notes
 
@@ -43,10 +50,8 @@ The thresholds are intentionally strict enough to act as early architecture-smel
 
 ## Remaining Custom Candidates
 
-These are still better handled by project-specific checks or review prompts:
+The remaining custom candidates are mostly domain-specific allowlists and
+project-specific suppression policies around the `clean-code-*` messages.
 
-- output-argument mutation as a semantic smell
-- comments that merely restate the following line
-- Law of Demeter / train-wreck navigation with domain-specific allowlists
-- business-policy string/date/status literals beyond numeric `PLR2004`
-- exact TODO format such as `TODO(PROJ-123): ...`
+See [python-pylint-custom-rules.md](./python-pylint-custom-rules.md) for the
+custom rule details.

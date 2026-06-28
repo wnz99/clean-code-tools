@@ -78,6 +78,9 @@ split-on-trailing-comma = true
 py-version = "3.11"
 jobs = 0
 recursive = true
+load-plugins = [
+  "clean_code_tools_pylint",
+]
 ignore-paths = [
   "^\\.venv/.*$",
   "^build/.*$",
@@ -92,6 +95,14 @@ disable = [
 ]
 enable = [
   "cyclic-import",
+  "clean-code-boolean-flag-argument",
+  "clean-code-business-policy-literal",
+  "clean-code-commented-out-code",
+  "clean-code-noisy-comment",
+  "clean-code-output-argument-mutation",
+  "clean-code-redundant-comment",
+  "clean-code-todo-format",
+  "clean-code-train-wreck",
   "duplicate-code",
   "import-error",
   "too-many-ancestors",

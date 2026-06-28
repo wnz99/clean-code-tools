@@ -17,18 +17,18 @@ From the repo root:
 
 ```bash
 uv sync
-npm run weaviate:dev:start
-npm run weaviate:dev:smoke
-npm run weaviate:dev:status
-npm run weaviate:dev:logs
-npm run weaviate:dev:stop
+bun run weaviate:dev:start
+bun run weaviate:dev:smoke
+bun run weaviate:dev:status
+bun run weaviate:dev:logs
+bun run weaviate:dev:stop
 ```
 
 If port `8080` is already taken:
 
 ```bash
-WEAVIATE_HTTP_PORT=18080 WEAVIATE_GRPC_PORT=15051 npm run weaviate:dev:start
-WEAVIATE_HTTP_PORT=18080 npm run weaviate:dev:smoke
+WEAVIATE_HTTP_PORT=18080 WEAVIATE_GRPC_PORT=15051 bun run weaviate:dev:start
+WEAVIATE_HTTP_PORT=18080 bun run weaviate:dev:smoke
 ```
 
 The semantic ingestion scripts default to `WEAVIATE_URL=http://127.0.0.1:8080`.

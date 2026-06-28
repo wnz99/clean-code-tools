@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from src.mcp_server.corpus import build_chunks
-from src.mcp_server.models import DEFAULT_EMBEDDING_MODEL, JsonDict
-from src.mcp_server.ranking_scoring import (
+from mcp_server.corpus import build_chunks
+from mcp_server.models import DEFAULT_EMBEDDING_MODEL, JsonDict
+from mcp_server.ranking_scoring import (
     dedupe_pattern_results,
     distance_for,
     row_matches_filters,
     score_pattern_row,
 )
-from src.mcp_server.text import (
+from mcp_server.text import (
     lexical_score,
     query_tokens,
 )
-from src.mcp_server.weaviate import COLLECTION_NAME, search_chunks
+from mcp_server.weaviate import COLLECTION_NAME, search_chunks
 
 
 def search_pattern_records(  # noqa: PLR0913  # pylint: disable=too-many-arguments,too-many-locals

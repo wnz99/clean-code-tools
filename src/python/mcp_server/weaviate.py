@@ -5,12 +5,12 @@ import json
 import os
 import re
 
-from src.mcp_server.models import DEFAULT_EMBEDDING_MODEL, CleanCodeChunk, JsonDict
-from src.mcp_server.utils.httpx_loader import require_httpx
+from mcp_server.models import DEFAULT_EMBEDDING_MODEL, CleanCodeChunk, JsonDict
+from mcp_server.utils.httpx_loader import require_httpx
 
 COLLECTION_NAME = "CleanCodeChunks"
 VECTOR_NAME = "content"
-DEFAULT_WEAVIATE_URL = os.environ.get("WEAVIATE_URL", "http://127.0.0.1:8080")
+DEFAULT_WEAVIATE_URL = os.environ.get("WEAVIATE_URL", "http://127.0.0.1:8080")  # pylint: disable=clean-code-business-policy-literal
 DEFAULT_BATCH_SIZE = 64
 HTTP_NOT_FOUND = 404
 GRAPHQL_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -110,7 +110,7 @@ def ingest_chunks(
             response.raise_for_status()
             failures = batch_failures(response.json())
             if failures:
-                raise RuntimeError(f"Weaviate rejected {len(failures)} objects: {failures[:3]}")  # noqa: TRY003
+                raise RuntimeError(f"Weaviate rejected {len(failures)} objects: {failures[:3]}")  # noqa: TRY003  # pylint: disable=clean-code-business-policy-literal
             inserted += len(batch)
     return inserted
 
@@ -179,4 +179,4 @@ def batch_failures(payload: JsonDict) -> list[JsonDict]:
 def is_successful_batch_row(row: JsonDict) -> bool:
     result = row.get("result")
     status = result.get("status") if isinstance(result, dict) else row.get("status")
-    return isinstance(status, str) and status.upper() in {"SUCCESS", "OK"}
+    return isinstance(status, str) and status.upper() in {"SUCCESS", "OK"}  # pylint: disable=clean-code-business-policy-literal

@@ -4,4 +4,4 @@ from __future__ import annotations
 
 def increment(counter: dict[str, int], value: str) -> None:
     if value:
-        counter[value] = counter.get(value, 0) + 1
+        counter[value] = counter.get(value, 0) + 1  # pylint: disable=clean-code-output-argument-mutation

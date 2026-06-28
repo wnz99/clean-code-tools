@@ -19,9 +19,9 @@ The clean file should pass. The smelly file should report TODO tracking, comment
 
 ```bash
 cd sample-apps/ts-backend
-npm install
-npm run lint:clean
-npm run lint:smelly
+bun install
+bun run lint:clean
+bun run lint:smelly
 ```
 
 The clean handler should pass. The smelly handler should report untracked TODOs, commented-out code, boolean flag arguments, policy literals, train-wreck navigation, and null usage.
@@ -30,9 +30,9 @@ The clean handler should pass. The smelly handler should report untracked TODOs,
 
 ```bash
 cd sample-apps/ts-frontend
-npm install
-npm run lint:clean
-npm run lint:smelly
+bun install
+bun run lint:clean
+bun run lint:smelly
 ```
 
 The clean widget should pass. The smelly widget should report untracked TODOs, commented-out code, train-wreck navigation, policy literals, output argument mutation, null usage, and boolean flag arguments.

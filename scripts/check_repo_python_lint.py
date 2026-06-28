@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PYTHON_SRC = ROOT / "src" / "python"
 PYTHON_TARGETS = [
-    "src/mcp_server",
+    "src/python/clean_code_tools_pylint",
+    "src/python/mcp_server",
     "scripts",
 ]
 PYLINT_TARGETS = [
-    "src/mcp_server",
+    "src/python/clean_code_tools_pylint",
+    "src/python/mcp_server",
 ]
 
 
 def run(command: list[str], *, cwd: Path = ROOT) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{PYTHON_SRC}:{env.get('PYTHONPATH', '')}".rstrip(":")
     completed = subprocess.run(
         command,
         cwd=cwd,
+        env=env,
         check=False,
         text=True,
         stdout=subprocess.PIPE,

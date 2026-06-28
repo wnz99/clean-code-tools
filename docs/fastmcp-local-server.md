@@ -13,17 +13,17 @@ uv sync
 ## Prepare Weaviate
 
 ```bash
-npm run weaviate:dev:start
-npm run weaviate:dev:smoke
-npm run semantic:ingest -- --reset
+bun run weaviate:dev:start
+bun run weaviate:dev:smoke
+bun run semantic:ingest -- --reset
 ```
 
 If the default port is busy, use the same alternate port for all commands:
 
 ```bash
-WEAVIATE_HTTP_PORT=38080 WEAVIATE_GRPC_PORT=35051 npm run weaviate:dev:start
-WEAVIATE_HTTP_PORT=38080 npm run weaviate:dev:smoke
-npm run semantic:ingest -- --url http://127.0.0.1:38080 --reset
+WEAVIATE_HTTP_PORT=38080 WEAVIATE_GRPC_PORT=35051 bun run weaviate:dev:start
+WEAVIATE_HTTP_PORT=38080 bun run weaviate:dev:smoke
+bun run semantic:ingest -- --url http://127.0.0.1:38080 --reset
 ```
 
 ## Run MCP
@@ -31,13 +31,13 @@ npm run semantic:ingest -- --url http://127.0.0.1:38080 --reset
 Stdio:
 
 ```bash
-npm run mcp:stdio
+bun run mcp:stdio
 ```
 
 HTTP:
 
 ```bash
-npm run mcp:http
+bun run mcp:http
 ```
 
 The HTTP server defaults to `http://127.0.0.1:8765`.

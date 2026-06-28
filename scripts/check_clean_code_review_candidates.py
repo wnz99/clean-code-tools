@@ -70,6 +70,14 @@ ESLINT_SEMANTIC_EXCLUSIONS = {
 }
 
 EXPECTED_PYLINT_TRIGGERS = {
+    "clean-code-boolean-flag-argument",
+    "clean-code-business-policy-literal",
+    "clean-code-commented-out-code",
+    "clean-code-noisy-comment",
+    "clean-code-output-argument-mutation",
+    "clean-code-redundant-comment",
+    "clean-code-todo-format",
+    "clean-code-train-wreck",
     "cyclic-import",
     "duplicate-code",
     "too-few-public-methods",
@@ -209,6 +217,14 @@ def main() -> None:
         {
             "path": "sample-apps/python-app/src/smelly_pricing.py",
             "obj": "calculate_total",
+            "line": 7,
+            "column": 4,
+            "symbol": "clean-code-output-argument-mutation",
+            "message": "Avoid mutating parameter 'order' as an output argument.",
+        },
+        {
+            "path": "sample-apps/python-app/src/smelly_pricing.py",
+            "obj": "calculate_total",
             "line": 5,
             "column": 0,
             "symbol": "missing-function-docstring",
@@ -246,7 +262,7 @@ def main() -> None:
     payload = candidate_payload(candidates)
 
     assert payload["schema"] == "clean-code-review-candidates/v1"
-    assert payload["candidate_count"] == 5
+    assert payload["candidate_count"] == 6
 
     assert {candidate["skill"] for candidate in payload["candidates"]} == {
         "clean-code-mcp-reviewer"
@@ -262,6 +278,11 @@ def main() -> None:
     assert {candidate["anchor"] for candidate in typescript_candidates} == {"line 12", "line 44"}
     assert any(candidate["symbol"] == "calculate_total" for candidate in python_candidates)
     assert any("too many arguments" in candidate["mcp_queries"][0] for candidate in python_candidates)
+    assert any(
+        trigger["tool"] == "pylint" and trigger["rule"] == "clean-code-output-argument-mutation"
+        for candidate in python_candidates
+        for trigger in candidate["triggers"]
+    )
     assert any(
         trigger["tool"] == "ruff" and trigger["rule"] == "TD003"
         for candidate in python_candidates

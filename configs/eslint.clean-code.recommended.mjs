@@ -2,7 +2,7 @@ import js from "@eslint/js";
 import sonarjs from "eslint-plugin-sonarjs";
 import unicorn from "eslint-plugin-unicorn";
 import tseslint from "typescript-eslint";
-import cleanCode from "../src/eslint-plugin-clean-code.mjs";
+import cleanCode from "../src/js/eslint-plugin-clean-code.mjs";
 
 const TEST_FILE_PATTERNS = [
   "**/*.test.{js,jsx,ts,tsx}",

@@ -261,12 +261,11 @@ wheels = [
 
 [[package]]
 name = "clean-code-tools-python"
-version = "0.1.0"
-source = { virtual = "." }
+version = "1.0.0"
+source = { editable = "." }
 dependencies = [
-    { name = "fastembed" },
-    { name = "fastmcp" },
-    { name = "httpx" },
+    { name = "pylint" },
+    { name = "ruff" },
 ]
 
 [package.dev-dependencies]
@@ -274,21 +273,30 @@ lint = [
     { name = "pylint" },
     { name = "ruff" },
 ]
+mcp = [
+    { name = "fastembed" },
+    { name = "fastmcp" },
+    { name = "httpx" },
+]
 typecheck = [
     { name = "pyright" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "fastembed", specifier = ">=0.8.0" },
-    { name = "fastmcp", specifier = ">=2.0.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "pylint", specifier = ">=4.0.0" },
+    { name = "ruff", specifier = ">=0.15.0" },
 ]
 
 [package.metadata.requires-dev]
 lint = [
     { name = "pylint", specifier = ">=4.0.0" },
     { name = "ruff", specifier = ">=0.15.0" },
+]
+mcp = [
+    { name = "fastembed", specifier = ">=0.8.0" },
+    { name = "fastmcp", specifier = ">=2.0.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
 ]
 typecheck = [{ name = "pyright", specifier = ">=1.1.403" }]
 

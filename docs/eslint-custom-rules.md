@@ -1,6 +1,6 @@
 # ESLint Custom Clean-Code Rules
 
-The local plugin lives at [src/eslint-plugin-clean-code.mjs](../src/eslint-plugin-clean-code.mjs). These rules cover TypeScript clean-code checks that are not well covered by common ESLint rule sets.
+The local plugin lives at [src/js/eslint-plugin-clean-code.mjs](../src/js/eslint-plugin-clean-code.mjs). These rules cover TypeScript clean-code checks that are not well covered by common ESLint rule sets.
 
 ## Rules
 

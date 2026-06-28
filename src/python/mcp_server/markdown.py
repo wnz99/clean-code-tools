@@ -4,9 +4,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from src.mcp_server.models import MarkdownSection
-from src.mcp_server.text import approximate_tokens, detected_record_id, slugless
-from src.mcp_server.utils.unique_strings import unique_strings
+from mcp_server.models import MarkdownSection
+from mcp_server.text import approximate_tokens, detected_record_id, slugless
+from mcp_server.utils.unique_strings import unique_strings
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 CODE_FENCE_RE = re.compile(r"^\s*```")

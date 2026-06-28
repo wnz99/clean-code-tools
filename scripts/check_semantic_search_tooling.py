@@ -15,7 +15,11 @@ def main() -> None:
 
     chunks = semantic.build_chunks()
 
-    assert len(chunks) >= 560
+    by_kind = {}
+    for chunk in chunks:
+        by_kind[chunk.chunk_kind] = by_kind.get(chunk.chunk_kind, 0) + 1
+    assert by_kind["pattern_record"] == 264
+    assert by_kind["markdown_section"] >= 40
     assert len({chunk.chunk_id for chunk in chunks}) == len(chunks)
     assert len({chunk.object_id for chunk in chunks}) == len(chunks)
     for chunk in chunks:

@@ -1,7 +1,7 @@
 import { RuleTester } from "eslint";
 import tsParser from "@typescript-eslint/parser";
 import { describe, it } from "node:test";
-import plugin from "../src/eslint-plugin-clean-code.mjs";
+import plugin from "../src/js/eslint-plugin-clean-code.mjs";
 
 RuleTester.afterAll = () => {};
 RuleTester.describe = describe;

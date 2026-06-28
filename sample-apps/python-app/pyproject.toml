@@ -58,6 +58,9 @@ unfixable = [
 py-version = "3.11"
 jobs = 0
 recursive = true
+load-plugins = [
+  "clean_code_tools_pylint",
+]
 
 [tool.pylint."messages control"]
 disable = [
@@ -65,6 +68,14 @@ disable = [
 ]
 enable = [
   "cyclic-import",
+  "clean-code-boolean-flag-argument",
+  "clean-code-business-policy-literal",
+  "clean-code-commented-out-code",
+  "clean-code-noisy-comment",
+  "clean-code-output-argument-mutation",
+  "clean-code-redundant-comment",
+  "clean-code-todo-format",
+  "clean-code-train-wreck",
   "duplicate-code",
   "import-error",
   "too-many-ancestors",
@@ -83,20 +94,20 @@ enable = [
 
 [tool.pylint.design]
 max-args = 5
-max-attributes = 8
+max-attributes = 7
 max-bool-expr = 5
 max-branches = 12
 max-locals = 15
 max-nested-blocks = 4
-max-public-methods = 20
+max-public-methods = 12
 max-returns = 6
-max-statements = 50
+max-statements = 40
 max-parents = 7
 min-public-methods = 1
 
 [tool.pylint.format]
 max-line-length = 100
-max-module-lines = 1000
+max-module-lines = 300
 
 [tool.pylint.reports]
 score = false

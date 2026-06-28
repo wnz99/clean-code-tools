@@ -33,7 +33,7 @@ candidate contains:
 From lint JSON files:
 
 ```bash
-npm run clean-code:candidates -- \
+bun run clean-code:candidates -- \
   --eslint-json eslint-report.json \
   --pylint-json pylint-report.json \
   --ruff-json ruff-report.json
@@ -42,17 +42,17 @@ npm run clean-code:candidates -- \
 From lint commands:
 
 ```bash
-npm run clean-code:candidates -- \
-  --pylint-command "uv run --group lint pylint src/mcp_server --output-format=json" \
-  --ruff-command "uv run --group lint ruff check src/mcp_server --output-format=json"
+bun run clean-code:candidates -- \
+  --pylint-command "uv run --group lint pylint src/python/mcp_server --output-format=json" \
+  --ruff-command "uv run --group lint ruff check src/python/mcp_server --output-format=json"
 ```
 
 Markdown is useful for agent prompts:
 
 ```bash
-npm run clean-code:candidates -- \
-  --pylint-command "uv run --group lint pylint src/mcp_server --output-format=json" \
-  --ruff-command "uv run --group lint ruff check src/mcp_server --output-format=json" \
+bun run clean-code:candidates -- \
+  --pylint-command "uv run --group lint pylint src/python/mcp_server --output-format=json" \
+  --ruff-command "uv run --group lint ruff check src/python/mcp_server --output-format=json" \
   --format markdown
 ```
 
