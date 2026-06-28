@@ -51,6 +51,12 @@ proceed:
 python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --apply
 ```
 
+`--apply` is still interactive by default. The installer asks before every
+host-side action it offers: modifying lint config files, installing packages,
+copying the Docker MCP runtime, starting Docker services, or installing Git
+hooks. For non-interactive automation, pass `--yes` only after the user has
+already approved the whole plan and each selected setup category is intentional.
+
 Use `--repo /path/to/repo` when the current directory is not the target repo.
 Use `--skip-install` only for dry integration tests or when the user wants file
 changes but will install dependencies separately. Use `--allow-dirty` only when
@@ -82,6 +88,46 @@ Installer behavior:
 After applying, run the repo's normal lint/test commands. If the new static
 rules produce maintainability candidates, use the MCP workflow below to decide
 which findings deserve refactors.
+
+### Optional Git Hook Feedback
+
+The installer can also set up local Git hooks that run the deterministic lint
+checks before commit and/or push and print clean-code MCP review candidates back
+to the agent. This is useful when the user wants a static check to trigger a
+semantic follow-up review automatically.
+
+Interactive apply mode asks whether hooks should be installed. To plan a
+specific choice explicitly:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --git-hooks both
+```
+
+To apply after approval:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --apply --git-hooks both
+```
+
+Hook choices are `none`, `pre-commit`, `pre-push`, or `both`. The default hook
+mode is `advisory`, which prints feedback without blocking Git. Use
+`--git-hook-mode blocking` only when the user wants candidate findings to fail
+the hook until reviewed. A local run can bypass hooks intentionally with:
+
+```bash
+CLEAN_CODE_AGENT_HOOK=0 git commit
+```
+
+or force advisory behavior for one command with:
+
+```bash
+CLEAN_CODE_AGENT_HOOK_MODE=advisory git push
+```
+
+Hook output is a tripwire, not a final review result. When a hook prints
+candidate locations and suggested MCP queries, read the named files first, use
+this skill, query the MCP narrowly, and decide whether each candidate is a real
+maintainability issue in context.
 
 ## Installing The Local MCP Runtime
 

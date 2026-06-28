@@ -35,6 +35,11 @@
       "id": 7,
       "prompt": "Set up the clean-code MCP locally for this repo, but do not install Python dependencies directly on the host. Use Docker if the skill provides a runtime.",
       "expected_output": "The agent plans the bundled Docker MCP runtime install, explains that it will create .clean-code-mcp with Dockerfile, compose.yaml, runtime source, and corpus, then uses --mcp-runtime or --start-mcp-runtime only after approval."
+    },
+    {
+      "id": 8,
+      "prompt": "Install the clean-code lint rules and also add automated feedback when an agent commits or pushes. I want the setup to ask me before it changes or installs anything.",
+      "expected_output": "The agent runs the installer dry-run first, explains the planned lint config, package installs, and optional Git hooks, then uses interactive --apply without assuming consent. It describes --git-hooks choices, advisory versus blocking mode, and treats hook output as MCP review candidates rather than final findings."
     }
   ]
 }

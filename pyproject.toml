@@ -199,6 +199,9 @@ split-on-trailing-comma = true
 "scripts/clean_code_python_triggers.py" = [
   "INP001",
 ]
+"scripts/clean_code_trigger_catalog.py" = [
+  "INP001",
+]
 "scripts/clean_code_review_io.py" = [
   "INP001",
 ]
@@ -215,6 +218,11 @@ split-on-trailing-comma = true
   "S603",
   "T201",
   "TRY003",
+]
+"skills/clean-code-mcp-reviewer/hooks/clean_code_agent_feedback.py" = [
+  "S603",
+  "S607",
+  "T201",
 ]
 "skills/clean-code-mcp-reviewer/runtime/scripts/docker_init_weaviate.py" = [
   "S603",
@@ -235,6 +243,9 @@ split-on-trailing-comma = true
   "PLC0415",
   "PLR0913",
   "TRY003",
+]
+"skills/clean-code-mcp-reviewer/runtime/src/python/mcp_server/server.py" = [
+  "PLR0913",
 ]
 "src/python/mcp_server/semantic.py" = [
   "PLC0415",

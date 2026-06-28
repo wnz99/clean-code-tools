@@ -18,6 +18,12 @@ MCP_RUNTIME_FILES = (
     SKILL_ROOT / "runtime",
 )
 MCP_RUNTIME_TARGET = ".clean-code-mcp"
+HOOK_SOURCE = SKILL_ROOT / "hooks" / "clean_code_agent_feedback.py"
+HOOK_CATALOG_SOURCE = SKILL_ROOT / "catalog" / "clean_code_review_triggers.json"
+HOOK_SCRIPT_NAME = "clean_code_agent_feedback.py"
+HOOK_CATALOG_NAME = "clean_code_review_triggers.json"
+HOOK_MARKER = "# clean-code-mcp-reviewer hook"
+HOOK_CHOICES = ("ask", "none", "pre-commit", "pre-push", "both")
 
 JS_DEV_PACKAGES = [
     "clean-code-tools",
@@ -43,13 +49,29 @@ class Change:
 
 
 @dataclass
+class PlannedCommand:
+    label: str
+    command: list[str]
+    category: str
+
+
+@dataclass
+class ApplyOptions:
+    wants_mcp_runtime: bool
+    hook_choice: str
+    hook_mode: str
+    assume_yes: bool
+    skip_install: bool
+
+
+@dataclass
 class Plan:
     repo: Path
     languages: list[str] = field(default_factory=list)
     changes: list[Change] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    commands: list[list[str]] = field(default_factory=list)
+    commands: list[PlannedCommand] = field(default_factory=list)
 
     @property
     def can_apply(self) -> bool:
@@ -147,7 +169,13 @@ def plan_js(repo: Path, plan: Plan) -> None:
     plan.languages.append("javascript/typescript")
     if shutil.which(package_manager) is None:
         plan.blockers.append(f"Detected {package_manager}, but `{package_manager}` is not installed.")
-    plan.commands.append(js_install_command(package_manager))
+    plan.commands.append(
+        PlannedCommand(
+            "install JavaScript/TypeScript clean-code dev packages",
+            js_install_command(package_manager),
+            "dependency-install",
+        )
+    )
 
     scripts = package_json_scripts(repo)
     if not scripts:
@@ -212,7 +240,13 @@ def plan_python(repo: Path, plan: Plan) -> None:
     else:
         if shutil.which(command[0]) is None and command[0] != sys.executable:
             plan.blockers.append(f"Detected Python installer `{command[0]}`, but it is not installed.")
-        plan.commands.append(command)
+        plan.commands.append(
+            PlannedCommand(
+                "install Python clean-code dev package",
+                command,
+                "dependency-install",
+            )
+        )
 
     pyproject = repo / "pyproject.toml"
     if not pyproject.exists():
@@ -268,15 +302,92 @@ def plan_mcp_runtime(repo: Path, plan: Plan, *, start: bool) -> None:
     )
     if start:
         plan.commands.append(
-            [
-                "docker",
-                "compose",
-                "-f",
-                f"{MCP_RUNTIME_TARGET}/compose.yaml",
-                "up",
-                "--build",
-                "-d",
-            ]
+            PlannedCommand(
+                "start Dockerized clean-code MCP runtime",
+                [
+                    "docker",
+                    "compose",
+                    "-f",
+                    f"{MCP_RUNTIME_TARGET}/compose.yaml",
+                    "up",
+                    "--build",
+                    "-d",
+                ],
+                "docker-runtime",
+            )
+        )
+
+
+def git_hooks_dir(repo: Path) -> Path:
+    completed = run(["git", "rev-parse", "--git-path", "hooks"], cwd=repo, check=False)
+    hooks_path = completed.stdout.strip()
+    if completed.returncode == 0 and hooks_path:
+        return (repo / hooks_path).resolve()
+    return repo / ".git" / "hooks"
+
+
+def selected_hooks(choice: str) -> tuple[str, ...]:
+    if choice == "both":
+        return ("pre-commit", "pre-push")
+    if choice in ("pre-commit", "pre-push"):
+        return (choice,)
+    return ()
+
+
+def prompt_hook_choice() -> str:
+    print("\nInstall clean-code agent feedback Git hooks?")
+    print("  1. no hooks")
+    print("  2. pre-commit only")
+    print("  3. pre-push only")
+    print("  4. both pre-commit and pre-push")
+    answer = input("Choose [1-4, default 1]: ").strip()
+    return {
+        "2": "pre-commit",
+        "3": "pre-push",
+        "4": "both",
+    }.get(answer, "none")
+
+
+def resolve_hook_choice(choice: str) -> str:
+    if choice == "ask" and sys.stdin.isatty():
+        return prompt_hook_choice()
+    if choice == "ask":
+        return "none"
+    return choice
+
+
+def plan_git_hooks(repo: Path, plan: Plan, *, choice: str, mode: str) -> None:
+    hooks = selected_hooks(choice)
+    if not hooks:
+        plan.warnings.append(
+            "Git hooks were not selected. Use --git-hooks pre-commit, pre-push, or both to install agent feedback hooks."
+        )
+        return
+    if not (repo / ".git").exists():
+        plan.blockers.append("Git hooks requested, but this is not a Git working tree.")
+        return
+    missing_hook_files = [
+        str(path)
+        for path in (HOOK_SOURCE, HOOK_CATALOG_SOURCE)
+        if not path.exists()
+    ]
+    if missing_hook_files:
+        plan.blockers.append(f"Hook support is missing from the skill: {', '.join(missing_hook_files)}")
+        return
+    hooks_dir = git_hooks_dir(repo)
+    for hook_name in hooks:
+        hook_path = hooks_dir / hook_name
+        if hook_path.exists() and HOOK_MARKER not in hook_path.read_text(errors="ignore"):
+            plan.blockers.append(
+                f"{hook_name} already exists and is not managed by clean-code-mcp-reviewer. "
+                "Merge the hook manually or move the existing hook first."
+            )
+            continue
+        plan.changes.append(
+            Change(
+                f"install {hook_name} hook",
+                f"Run clean-code agent feedback in {mode} mode whenever Git invokes {hook_name}.",
+            )
         )
 
 
@@ -284,6 +395,8 @@ def add_clean_code_to_eslint_array(text: str) -> str:
     import_line = 'import cleanCode from "clean-code-tools/configs/eslint.clean-code.recommended.mjs";\n'
     if import_line not in text:
         text = import_line + text
+    if "export default []" in text:
+        return text.replace("export default []", "export default [\n  ...cleanCode,\n]", 1)
     return text.replace("export default [", "export default [\n  ...cleanCode,", 1)
 
 
@@ -313,17 +426,34 @@ def apply_python(repo: Path) -> None:
     pyproject.write_text(text.rstrip() + "\n\n" + template)
 
 
-def apply_plan(plan: Plan, *, skip_install: bool) -> None:
+def confirm(action: str, *, assume_yes: bool) -> bool:
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        print(f"skipped: {action} requires interactive approval or --yes")
+        return False
+    answer = input(f"{action}? [y/N]: ").strip().lower()
+    return answer in {"y", "yes"}
+
+
+def apply_lint_config(plan: Plan) -> None:
     for language in plan.languages:
         if language == "javascript/typescript":
             apply_js(plan.repo)
         if language == "python":
             apply_python(plan.repo)
-    if skip_install:
-        return
-    for command in plan.commands:
-        print(f"running: {' '.join(command)}")
-        run(command, cwd=plan.repo)
+
+
+def run_planned_commands(plan: Plan, *, category: str) -> None:
+    for planned in plan.commands:
+        if planned.category != category:
+            continue
+        print(f"running: {' '.join(planned.command)}")
+        run(planned.command, cwd=plan.repo)
+
+
+def has_commands(plan: Plan, category: str) -> bool:
+    return any(command.category == category for command in plan.commands)
 
 
 def apply_mcp_runtime(repo: Path) -> None:
@@ -337,6 +467,32 @@ def apply_mcp_runtime(repo: Path) -> None:
             shutil.copy2(source, destination)
 
 
+def hook_wrapper(hook_name: str, *, mode: str) -> str:
+    return f"""#!/bin/sh
+{HOOK_MARKER}
+HOOK_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+if [ "${{CLEAN_CODE_AGENT_HOOK:-1}}" = "0" ]; then
+  exit 0
+fi
+exec python3 "$HOOK_DIR/{HOOK_SCRIPT_NAME}" --hook {hook_name} --mode "${{CLEAN_CODE_AGENT_HOOK_MODE:-{mode}}}"
+"""
+
+
+def apply_git_hooks(repo: Path, *, choice: str, mode: str) -> None:
+    hooks = selected_hooks(choice)
+    if not hooks:
+        return
+    hooks_dir = git_hooks_dir(repo)
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(HOOK_SOURCE, hooks_dir / HOOK_SCRIPT_NAME)
+    shutil.copy2(HOOK_CATALOG_SOURCE, hooks_dir / HOOK_CATALOG_NAME)
+    (hooks_dir / HOOK_SCRIPT_NAME).chmod(0o755)
+    for hook_name in hooks:
+        hook_path = hooks_dir / hook_name
+        hook_path.write_text(hook_wrapper(hook_name, mode=mode))
+        hook_path.chmod(0o755)
+
+
 def print_plan(plan: Plan) -> None:
     print(f"repo: {plan.repo}")
     print(f"languages: {', '.join(plan.languages) if plan.languages else 'none'}")
@@ -345,9 +501,9 @@ def print_plan(plan: Plan) -> None:
         for change in plan.changes:
             print(f"- {change.label}: {change.detail}")
     if plan.commands:
-        print("\ninstall commands:")
-        for command in plan.commands:
-            print(f"- {' '.join(command)}")
+        print("\nplanned commands:")
+        for planned in plan.commands:
+            print(f"- {planned.label}: {' '.join(planned.command)}")
     if plan.warnings:
         print("\nwarnings:")
         for warning in plan.warnings:
@@ -361,10 +517,15 @@ def print_plan(plan: Plan) -> None:
         print("\nstatus: safe to apply")
 
 
-def main() -> None:
+def parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Install clean-code lint packages and config.")
     parser.add_argument("--repo", default=".", help="Repository root to inspect.")
     parser.add_argument("--apply", action="store_true", help="Apply safe changes and install packages.")
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Apply all planned host changes without interactive confirmation. Use only in automation.",
+    )
     parser.add_argument("--allow-dirty", action="store_true", help="Allow applying with a dirty git worktree.")
     parser.add_argument("--skip-install", action="store_true", help="Modify files without running package installers.")
     parser.add_argument(
@@ -377,8 +538,95 @@ def main() -> None:
         action="store_true",
         help="After applying, run the Dockerized Weaviate + MCP stack.",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--git-hooks",
+        choices=HOOK_CHOICES,
+        default="ask",
+        help="Install local Git hooks for agent feedback. In interactive --apply mode, ask by default.",
+    )
+    parser.add_argument(
+        "--git-hook-mode",
+        choices=("advisory", "blocking"),
+        default="advisory",
+        help="Hook behavior when clean-code candidates are found.",
+    )
+    return parser
 
+
+def apply_lint_config_if_approved(plan: Plan, *, assume_yes: bool) -> None:
+    if not plan.languages:
+        return
+    if confirm("Modify lint configuration files", assume_yes=assume_yes):
+        apply_lint_config(plan)
+        return
+    print("skipped: lint configuration files were not modified")
+
+
+def apply_runtime_if_approved(repo: Path, *, wants_mcp_runtime: bool, assume_yes: bool) -> None:
+    if not wants_mcp_runtime:
+        return
+    if confirm(f"Create {MCP_RUNTIME_TARGET}/ Docker MCP runtime files", assume_yes=assume_yes):
+        apply_mcp_runtime(repo)
+        return
+    print(f"skipped: {MCP_RUNTIME_TARGET}/ was not created")
+
+
+def apply_hooks_if_approved(repo: Path, *, hook_choice: str, mode: str, assume_yes: bool) -> None:
+    if not selected_hooks(hook_choice):
+        return
+    if confirm("Install clean-code Git hook feedback", assume_yes=assume_yes):
+        apply_git_hooks(repo, choice=hook_choice, mode=mode)
+        return
+    print("skipped: Git hooks were not installed")
+
+
+def install_packages_if_approved(plan: Plan, *, skip_install: bool, assume_yes: bool) -> None:
+    if skip_install:
+        print("skipped: package installation disabled by --skip-install")
+        return
+    if not has_commands(plan, "dependency-install"):
+        return
+    if confirm("Install clean-code lint packages as development dependencies", assume_yes=assume_yes):
+        run_planned_commands(plan, category="dependency-install")
+        return
+    print("skipped: lint packages were not installed")
+
+
+def start_runtime_if_approved(plan: Plan, *, assume_yes: bool) -> None:
+    if not has_commands(plan, "docker-runtime"):
+        return
+    if confirm("Build and start the Dockerized clean-code MCP runtime", assume_yes=assume_yes):
+        run_planned_commands(plan, category="docker-runtime")
+        return
+    print("skipped: Dockerized clean-code MCP runtime was not started")
+
+
+def apply_requested_setup(plan: Plan, options: ApplyOptions) -> None:
+    if not plan.can_apply:
+        raise SystemExit(1)
+    apply_lint_config_if_approved(plan, assume_yes=options.assume_yes)
+    apply_runtime_if_approved(
+        plan.repo,
+        wants_mcp_runtime=options.wants_mcp_runtime,
+        assume_yes=options.assume_yes,
+    )
+    apply_hooks_if_approved(
+        plan.repo,
+        hook_choice=options.hook_choice,
+        mode=options.hook_mode,
+        assume_yes=options.assume_yes,
+    )
+    install_packages_if_approved(
+        plan,
+        skip_install=options.skip_install,
+        assume_yes=options.assume_yes,
+    )
+    start_runtime_if_approved(plan, assume_yes=options.assume_yes)
+    print("\nfinished: requested clean-code setup steps processed")
+
+
+def main() -> None:
+    args = parser().parse_args()
     repo = Path(args.repo).resolve()
     if not repo.exists():
         raise SystemExit(f"Repo does not exist: {repo}")
@@ -386,14 +634,25 @@ def main() -> None:
     plan = build_plan(repo, allow_dirty=args.allow_dirty, require_languages=not wants_mcp_runtime)
     if wants_mcp_runtime:
         plan_mcp_runtime(repo, plan, start=args.start_mcp_runtime)
+    hook_choice = resolve_hook_choice(args.git_hooks) if args.apply else args.git_hooks
+    if hook_choice != "ask":
+        plan_git_hooks(repo, plan, choice=hook_choice, mode=args.git_hook_mode)
+    elif (repo / ".git").exists():
+        plan.warnings.append(
+            "Git hook setup will be offered during --apply. Use --git-hooks none to skip the prompt."
+        )
     print_plan(plan)
     if args.apply:
-        if not plan.can_apply:
-            raise SystemExit(1)
-        if wants_mcp_runtime:
-            apply_mcp_runtime(repo)
-        apply_plan(plan, skip_install=args.skip_install)
-        print("\napplied: clean-code lint configuration updated")
+        apply_requested_setup(
+            plan,
+            ApplyOptions(
+                wants_mcp_runtime=wants_mcp_runtime,
+                hook_choice=hook_choice,
+                hook_mode=args.git_hook_mode,
+                assume_yes=args.yes,
+                skip_install=args.skip_install,
+            ),
+        )
 
 
 if __name__ == "__main__":
