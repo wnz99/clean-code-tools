@@ -16,8 +16,6 @@
     "bad_examples",
     "lint_candidates",
     "lintability",
-    "embedding_text",
-    "display_text",
     "source"
   ],
   "properties": {
@@ -27,20 +25,20 @@
     "rule_family": { "type": "string", "minLength": 3 },
     "aliases": {
       "type": "array",
-      "items": { "type": "string", "minLength": 2 },
+      "items": { "type": "string", "pattern": "\\S" },
       "minItems": 3,
       "uniqueItems": true
     },
-    "problem": { "type": "string", "minLength": 20 },
-    "use_when": { "type": "string", "minLength": 20 },
-    "avoid_when": { "type": "string", "minLength": 20 },
+    "problem": { "type": "string", "minLength": 4 },
+    "use_when": { "type": "string", "minLength": 10 },
+    "avoid_when": { "type": "string", "minLength": 10 },
     "good_examples": {
       "type": "object",
       "additionalProperties": false,
       "required": ["typescript", "python"],
       "properties": {
-        "typescript": { "type": "string", "minLength": 5 },
-        "python": { "type": "string", "minLength": 5 }
+        "typescript": { "$ref": "#/$defs/exampleSet" },
+        "python": { "$ref": "#/$defs/exampleSet" }
       }
     },
     "bad_examples": {
@@ -48,30 +46,41 @@
       "additionalProperties": false,
       "required": ["typescript", "python"],
       "properties": {
-        "typescript": { "type": "string", "minLength": 5 },
-        "python": { "type": "string", "minLength": 5 }
+        "typescript": { "$ref": "#/$defs/exampleSet" },
+        "python": { "$ref": "#/$defs/exampleSet" }
       }
     },
     "lint_candidates": {
       "type": "array",
-      "items": { "type": "string", "minLength": 10 },
-      "minItems": 1
+      "items": { "type": "string", "pattern": "\\S" },
+      "minItems": 1,
+      "uniqueItems": true
     },
     "lintability": {
       "type": "string",
       "enum": ["high", "medium", "low", "review_only"]
     },
-    "embedding_text": { "type": "string", "minLength": 300 },
-    "display_text": { "type": "string", "minLength": 300 },
     "source": {
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "version"],
       "properties": {
-        "kind": { "type": "string" },
+        "kind": { "type": "string", "minLength": 1 },
         "version": { "type": "integer", "minimum": 1 }
       }
     }
+  },
+  "$defs": {
+    "exampleSet": {
+      "oneOf": [
+        { "type": "string", "pattern": "\\S" },
+        {
+          "type": "array",
+          "items": { "type": "string", "pattern": "\\S" },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      ]
+    }
   }
 }
-

@@ -15,6 +15,8 @@ from mcp_server.text import (
 )
 from mcp_server.weaviate import COLLECTION_NAME, search_chunks
 
+DEFAULT_PATTERN_SOURCE_KINDS = ("clean_code_pattern", "custom_clean_code_pattern")
+
 
 def search_pattern_records(  # noqa: PLR0913  # pylint: disable=too-many-arguments,too-many-locals
     *,
@@ -27,7 +29,7 @@ def search_pattern_records(  # noqa: PLR0913  # pylint: disable=too-many-argumen
     rule_families: tuple[str, ...] = (),
     topics: tuple[str, ...] = (),
     lintability: tuple[str, ...] = (),
-    source_kinds: tuple[str, ...] = ("clean_code_pattern",),
+    source_kinds: tuple[str, ...] = DEFAULT_PATTERN_SOURCE_KINDS,
 ) -> JsonDict:
     vector_limit = max(limit * 4, 25)
     vector_rows = search_chunks(
@@ -58,7 +60,7 @@ def rank_pattern_rows(  # noqa: PLR0913  # pylint: disable=too-many-arguments,to
     rule_families: tuple[str, ...] = (),
     topics: tuple[str, ...] = (),
     lintability: tuple[str, ...] = (),
-    source_kinds: tuple[str, ...] = ("clean_code_pattern",),
+    source_kinds: tuple[str, ...] = DEFAULT_PATTERN_SOURCE_KINDS,
 ) -> JsonDict:
     rows_by_chunk_id: dict[str, JsonDict] = {}
     for row in [*vector_rows, *local_keyword_rows(query)]:

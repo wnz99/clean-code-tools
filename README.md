@@ -144,6 +144,30 @@ bun run check
 The HTTP server defaults to `http://127.0.0.1:8765`. The agent-facing tools are
 documented in [docs/fastmcp-local-server.md](docs/fastmcp-local-server.md).
 
+### MCP Capabilities
+
+The MCP server gives coding agents a semantic review layer on top of the static
+lint checks:
+
+- Inspect the available corpus and Weaviate schema with
+  `clean_code_corpus_summary` and `clean_code_weaviate_schema`.
+- Search clean-code guidance with `search_clean_code` for low-level chunk
+  retrieval or `search_clean_code_patterns` for pattern-first results with
+  confidence, scores, match reasons, and filters for language, topic, rule
+  family, lintability, and source kind.
+- Fetch built-in `CC-###` guidance or custom pattern details with
+  `get_clean_code_pattern`.
+- Ask `recommend_clean_code_lint_rules` whether a repeated smell has a practical
+  ESLint, Ruff, Pylint, or Semgrep rule candidate.
+- Discover available filter values with `list_clean_code_facets`.
+- Validate and manage repo-specific custom patterns with
+  `validate_clean_code_pattern`, `upsert_clean_code_pattern`,
+  `delete_custom_clean_code_pattern`, and `list_custom_clean_code_patterns`.
+
+Built-in `CC-###` records are read-only. Custom patterns use `CUSTOM-###` or a
+repo namespace such as `BILLING-001`, are validated with Pydantic before writes,
+and can optionally be synced into the local Weaviate collection.
+
 ## Dockerized MCP Runtime
 
 The skill can copy a self-contained Docker runtime into a target repo or host
@@ -190,9 +214,15 @@ The workflow and `clean-code-review-candidates/v1` schema are documented in
 ## Corpus
 
 For vector database ingestion, use `data/clean-code-patterns.jsonl`. It contains
-264 records with aliases, problem statements, use/avoid guidance, good and bad
-examples, lintability, and embedding/display text. The expected record shape is
+264 source records with aliases, problem statements, use/avoid guidance, good
+and bad examples, lintability, and source metadata. The expected record shape is
 documented in `data/vector-record.schema.json`.
+
+The JSONL corpus is the source of truth. Weaviate data is a derived index:
+ingestion generates compact `embeddingText` and readable `displayText` from the
+structured fields, then stores those generated values in Weaviate. Formatting or
+key-order changes in the JSONL do not matter, but `id` values are stable object
+identity and field names must keep matching the schema.
 
 Suggested vector metadata fields:
 

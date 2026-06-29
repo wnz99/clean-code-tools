@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json
-import uuid
 from pathlib import Path
 
 from mcp_server.markdown import (
@@ -11,7 +9,9 @@ from mcp_server.markdown import (
     markdown_sections,
     split_section_body,
 )
-from mcp_server.models import CleanCodeChunk, JsonDict
+from mcp_server.models import CleanCodeChunk, JsonDict, MarkdownSection
+from mcp_server.pattern_chunks import PatternChunkSpec, object_id_for, pattern_chunk
+from mcp_server.pattern_models import CleanCodePattern
 from mcp_server.text import (
     clean_alias,
     clean_topic,
@@ -33,15 +33,20 @@ MARKDOWN_SOURCES = (
     ROOT / "docs" / "python-pylint-custom-rules.md",
     ROOT / "docs" / "static-trigger-semantic-review.md",
 )
-CHUNK_ID_NAMESPACE = uuid.UUID("fd1b279f-073e-5aa4-bf70-9f70446a3d8f")
-
-
 def build_chunks(root: Path = ROOT) -> list[CleanCodeChunk]:
     chunks = [*pattern_record_chunks(root / PATTERN_RECORDS.relative_to(ROOT))]
     for source in MARKDOWN_SOURCES:
         path = root / source.relative_to(ROOT)
         if path.exists():
             chunks.extend(markdown_chunks(path, root=root))
+    try:
+        from mcp_server.custom_patterns import custom_pattern_chunks  # noqa: PLC0415
+    except ImportError:
+        return chunks
+    custom_path = None
+    if root != ROOT:
+        custom_path = str(root / "data" / "custom-clean-code-patterns.jsonl")
+    chunks.extend(custom_pattern_chunks(custom_path))
     return chunks
 
 
@@ -51,43 +56,17 @@ def pattern_record_chunks(path: Path) -> list[CleanCodeChunk]:
         for index, line in enumerate(handle):
             if not line.strip():
                 continue
-            record = json.loads(line)
-            chunk_id = f"pattern:{record['id']}"
-            topic = clean_topic(str(record["topic"]))
-            aliases = tuple(
-                alias
-                for alias in (clean_alias(str(item)) for item in record["aliases"])
-                if alias
-            )
-            embedding_text = clean_topic_text(str(record["embedding_text"]).strip())
-            display_text = clean_topic_text(str(record["display_text"]).strip())
-            languages = tuple(
-                language
-                for language in ("typescript", "python")
-                if record.get("good_examples", {}).get(language)
-                or record.get("bad_examples", {}).get(language)
-            )
+            record = CleanCodePattern.model_validate_json(line)
             chunks.append(
-                CleanCodeChunk(
-                    chunk_id=chunk_id,
-                    object_id=object_id_for(chunk_id),
-                    source_file=path.name,
-                    source_kind="clean_code_pattern",
-                    record_id=str(record["id"]),
-                    title=str(record["title"]),
-                    topic=topic,
-                    section_path=(topic, str(record["title"])),
-                    chunk_kind="pattern_record",
-                    chunk_index=index,
-                    rule_family=str(record["rule_family"]),
-                    lintability=str(record["lintability"]),
-                    aliases=aliases,
-                    languages=languages,
-                    lint_candidates=tuple(str(item) for item in record["lint_candidates"]),
-                    content_text=display_text,
-                    embedding_text=embedding_text,
-                    display_text=display_text,
-                    text_hash=sha256_text(embedding_text),
+                pattern_chunk(
+                    record,
+                    spec=PatternChunkSpec(
+                        chunk_index=index,
+                        source_file=path.name,
+                        source_kind="clean_code_pattern",
+                        chunk_kind="pattern_record",
+                        chunk_id_prefix="pattern",
+                    ),
                 )
             )
     return chunks
@@ -98,9 +77,8 @@ def load_pattern_records(path: Path = PATTERN_RECORDS) -> list[JsonDict]:
     with path.open() as handle:
         for line in handle:
             if line.strip():
-                record = json.loads(line)
-                if isinstance(record, dict):
-                    records.append(record)
+                record = CleanCodePattern.model_validate_json(line)
+                records.append(record.model_dump(mode="json"))
     return records
 
 
@@ -138,13 +116,13 @@ def markdown_chunks(path: Path, *, root: Path = ROOT) -> list[CleanCodeChunk]:
                     source_kind="markdown_doc",
                     record_id=record_id,
                     title=section.heading,
-                    topic=clean_topic(section.section_path[0]) if section.section_path else clean_topic(section.heading),
+                    topic=markdown_topic(section),
                     section_path=tuple(clean_topic(item) for item in section.section_path),
                     chunk_kind="markdown_section" if split_index == 0 else "markdown_section_part",
                     chunk_index=section_index * 100 + split_index,
                     rule_family=infer_markdown_rule_family(section),
                     lintability="",
-                    aliases=tuple(clean_alias(alias) for alias in markdown_aliases(section) if clean_alias(alias)),
+                    aliases=clean_markdown_aliases(section),
                     languages=languages_in_text(content_text),
                     lint_candidates=lint_candidates_in_text(content_text),
                     content_text=content_text,
@@ -156,5 +134,15 @@ def markdown_chunks(path: Path, *, root: Path = ROOT) -> list[CleanCodeChunk]:
     return chunks
 
 
-def object_id_for(chunk_id: str) -> str:
-    return str(uuid.uuid5(CHUNK_ID_NAMESPACE, chunk_id))
+def markdown_topic(section: MarkdownSection) -> str:
+    if section.section_path:
+        return clean_topic(section.section_path[0])
+    return clean_topic(section.heading)
+
+
+def clean_markdown_aliases(section: MarkdownSection) -> tuple[str, ...]:
+    return tuple(
+        alias
+        for alias in (clean_alias(value) for value in markdown_aliases(section))
+        if alias
+    )

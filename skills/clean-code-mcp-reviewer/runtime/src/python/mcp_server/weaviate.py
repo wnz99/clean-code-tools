@@ -115,6 +115,45 @@ def ingest_chunks(
     return inserted
 
 
+def upsert_chunk(
+    *,
+    chunk: CleanCodeChunk,
+    url: str,
+    collection_name: str = COLLECTION_NAME,
+    model_name: str = DEFAULT_EMBEDDING_MODEL,
+) -> None:
+    httpx = require_httpx()
+    vector = embed_texts([chunk.embedding_text], model_name=model_name, batch_size=1)[0]
+    payload = {
+        "class": collection_name,
+        "properties": chunk.properties,
+        "vectors": {VECTOR_NAME: vector},
+    }
+    response = httpx.put(
+        f"{url.rstrip('/')}/v1/objects/{collection_name}/{chunk.object_id}",
+        json=payload,
+        timeout=120,
+    )
+    response.raise_for_status()
+
+
+def delete_chunk(
+    *,
+    chunk: CleanCodeChunk,
+    url: str,
+    collection_name: str = COLLECTION_NAME,
+) -> bool:
+    httpx = require_httpx()
+    response = httpx.delete(
+        f"{url.rstrip('/')}/v1/objects/{collection_name}/{chunk.object_id}",
+        timeout=120,
+    )
+    if response.status_code == HTTP_NOT_FOUND:
+        return False
+    response.raise_for_status()
+    return True
+
+
 def search_chunks(
     *,
     query: str,

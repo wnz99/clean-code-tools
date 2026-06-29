@@ -6,6 +6,13 @@ import json
 from typing import Any
 
 from mcp_server import semantic
+from mcp_server.custom_pattern_tools import (
+    delete_custom_clean_code_pattern_payload,
+    list_custom_clean_code_pattern_payload,
+    upsert_clean_code_pattern_payload,
+    validate_clean_code_pattern_payload,
+)
+from mcp_server.pattern_lookup import pattern_by_id
 from mcp_server.server_payloads import (
     default_lint_targets,
     facet_counts,
@@ -140,15 +147,18 @@ def search_clean_code_patterns(
         rule_families=tuple(rule_families or ()),
         topics=tuple(topics or ()),
         lintability=tuple(lintability or ()),
-        source_kinds=tuple(source_kinds or ("clean_code_pattern",)),
+        source_kinds=tuple(source_kinds or semantic.DEFAULT_PATTERN_SOURCE_KINDS),
     )
 
 
 @mcp.tool
-def get_clean_code_pattern(pattern_id: str) -> dict[str, Any]:
-    """Return the full canonical clean-code pattern record for a `CC-###` ID."""
+def get_clean_code_pattern(
+    pattern_id: str,
+    custom_patterns_path: str | None = None,
+) -> dict[str, Any]:
+    """Return the full built-in or custom clean-code pattern record."""
 
-    return pattern_by_id(pattern_id)
+    return pattern_by_id(pattern_id, custom_patterns_path=custom_patterns_path)
 
 
 @mcp.tool
@@ -200,14 +210,57 @@ def list_clean_code_facets() -> dict[str, Any]:
     return facet_counts(build_chunks())
 
 
-def pattern_by_id(pattern_id: str) -> dict[str, Any]:
-    normalized = pattern_id.strip().upper()
-    if not semantic.CC_ID_RE.fullmatch(normalized):
-        raise ValueError("pattern_id must use the CC-### format")
-    record = get_pattern_record(normalized)
-    if record is None:
-        raise ValueError(f"pattern not found: {normalized}")
-    return record
+@mcp.tool
+def validate_clean_code_pattern(pattern: dict[str, Any]) -> dict[str, Any]:
+    return validate_clean_code_pattern_payload(pattern)
+
+
+@mcp.tool
+def list_custom_clean_code_patterns(
+    custom_patterns_path: str | None = None,
+) -> dict[str, Any]:
+    return list_custom_clean_code_pattern_payload(custom_patterns_path)
+
+
+@mcp.tool
+# pylint: disable-next=too-many-arguments
+def upsert_clean_code_pattern(
+    pattern: dict[str, Any],
+    custom_patterns_path: str | None = None,
+    *,
+    sync_weaviate: bool = True,
+    weaviate_url: str = DEFAULT_WEAVIATE_URL,
+    collection: str = COLLECTION_NAME,
+    model: str = DEFAULT_EMBEDDING_MODEL,
+) -> dict[str, Any]:
+    return upsert_clean_code_pattern_payload(
+        {
+            "pattern": pattern,
+            "custom_patterns_path": custom_patterns_path,
+            "sync_weaviate": sync_weaviate,
+            "weaviate_url": weaviate_url,
+            "collection": collection,
+            "model": model,
+        }
+    )
+
+
+@mcp.tool
+def delete_custom_clean_code_pattern(
+    pattern_id: str,
+    custom_patterns_path: str | None = None,
+    *,
+    sync_weaviate: bool = True,
+    weaviate_url: str = DEFAULT_WEAVIATE_URL,
+    collection: str = COLLECTION_NAME,
+) -> dict[str, Any]:
+    return delete_custom_clean_code_pattern_payload(
+        pattern_id,
+        custom_patterns_path,
+        sync_weaviate=sync_weaviate,
+        weaviate_url=weaviate_url,
+        collection=collection,
+    )
 
 
 def parse_args() -> argparse.Namespace:

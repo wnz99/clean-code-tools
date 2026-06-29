@@ -32,6 +32,34 @@ bun run semantic:ingest -- --url http://127.0.0.1:18080 --reset
 
 The default collection is `CleanCodeChunks`. The default embedding model is `BAAI/bge-small-en-v1.5`, running through `fastembed/cpu`.
 
+## Corpus Contract
+
+`data/clean-code-patterns.jsonl` is the canonical source. Each line is one
+structured JSON pattern record validated by
+`data/vector-record.schema.json`. Weaviate is only a derived search index.
+
+The durable contract is the schema fields, not JSON formatting or key order.
+Source records keep human-editable fields such as `id`, `title`, `topic`,
+`rule_family`, `aliases`, `problem`, `use_when`, `avoid_when`,
+`good_examples`, `bad_examples`, `lint_candidates`, `lintability`, and
+`source`.
+
+During ingestion, `build_chunks()` derives:
+
+- `chunkId`: `pattern:<id>`
+- `objectId`: deterministic UUID from `chunkId`
+- `embeddingText`: compact search text generated from the structured fields
+- `displayText`: readable text generated from the structured fields
+- `textHash`: hash of generated `embeddingText`
+
+Keep `id` stable for existing records. Changing an `id` creates a new Weaviate
+object identity; deleting a source record requires `semantic:ingest -- --reset`
+or an explicit delete path to remove the stale indexed object.
+
+Examples may be either one string or a list of strings per language. Lists are
+useful for high-value lintable patterns because multiple concrete good/bad
+examples improve both retrieval text and MCP review output.
+
 ## Search
 
 ```bash

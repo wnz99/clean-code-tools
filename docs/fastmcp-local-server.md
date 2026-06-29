@@ -49,9 +49,13 @@ The HTTP server defaults to `http://127.0.0.1:8765`.
 - `clean_code_weaviate_schema`: returns the `CleanCodeChunks` schema payload.
 - `search_clean_code`: low-level compatibility search over populated Weaviate chunks.
 - `search_clean_code_patterns`: pattern-first search for concrete code smells.
-- `get_clean_code_pattern`: full canonical lookup by `CC-###` ID.
+- `get_clean_code_pattern`: full lookup by built-in `CC-###` or custom pattern ID.
 - `recommend_clean_code_lint_rules`: lint-rule candidate guidance for repeated smells.
 - `list_clean_code_facets`: available filter values and counts.
+- `validate_clean_code_pattern`: validate a custom pattern payload without writing it.
+- `list_custom_clean_code_patterns`: list custom pattern records from the configured JSONL store.
+- `upsert_clean_code_pattern`: validate and store a custom pattern, optionally syncing Weaviate.
+- `delete_custom_clean_code_pattern`: delete a custom pattern, optionally syncing Weaviate.
 
 Pattern-first search arguments:
 
@@ -73,6 +77,15 @@ Full pattern lookup:
 }
 ```
 
+Custom pattern lookup:
+
+```json
+{
+  "pattern_id": "CUSTOM-001",
+  "custom_patterns_path": "data/custom-clean-code-patterns.jsonl"
+}
+```
+
 Lint-rule recommendation:
 
 ```json
@@ -82,6 +95,39 @@ Lint-rule recommendation:
   "targets": ["eslint", "semgrep"]
 }
 ```
+
+Custom pattern validation:
+
+```json
+{
+  "pattern": {
+    "id": "CUSTOM-001",
+    "title": "Prefer Named Payment States",
+    "topic": "Domain Rules",
+    "rule_family": "naming",
+    "aliases": ["payment state", "named status", "domain constant"],
+    "problem": "Raw payment status strings make policy drift hard to see.",
+    "use_when": "Use when status checks express business policy.",
+    "avoid_when": "Avoid when parsing external payloads at the boundary.",
+    "good_examples": {
+      "typescript": ["if (payment.status === PaymentStatus.Captured) settle(payment);"],
+      "python": ["if payment.status is PaymentStatus.CAPTURED:\n    settle(payment)"]
+    },
+    "bad_examples": {
+      "typescript": ["if (payment.status === 'captured') settle(payment);"],
+      "python": ["if payment.status == 'captured':\n    settle(payment)"]
+    },
+    "lint_candidates": ["Flag raw payment status strings outside adapters."],
+    "lintability": "high",
+    "source": {"kind": "custom", "version": 1}
+  }
+}
+```
+
+Built-in `CC-###` records are read-only. Custom records must use `CUSTOM-###`
+or a repository namespace such as `BILLING-001`. The default store is
+`data/custom-clean-code-patterns.jsonl`; set `CLEAN_CODE_CUSTOM_PATTERNS_PATH`
+or pass `custom_patterns_path` to use a repo-local file.
 
 ## Agent Workflow
 

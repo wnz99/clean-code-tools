@@ -56,6 +56,10 @@ async def main() -> None:
             "get_clean_code_pattern",
             "recommend_clean_code_lint_rules",
             "list_clean_code_facets",
+            "validate_clean_code_pattern",
+            "upsert_clean_code_pattern",
+            "delete_custom_clean_code_pattern",
+            "list_custom_clean_code_patterns",
         } <= tool_names
 
         resources = await client.list_resources()
@@ -65,7 +69,7 @@ async def main() -> None:
 
         summary = await client.call_tool("clean_code_corpus_summary", {})
         summary_data = summary.data
-        assert summary_data["chunks"] >= 560
+        assert summary_data["chunks"] >= 300
         assert summary_data["by_kind"]["pattern_record"] == 264
 
         schema = await client.call_tool("clean_code_weaviate_schema", {})

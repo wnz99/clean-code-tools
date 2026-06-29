@@ -18,6 +18,7 @@ keywords = [
 ]
 dependencies = [
   "astroid>=4.0.4",
+  "pydantic>=2.12.0",
   "pylint>=4.0.0",
   "ruff>=0.15.0",
 ]
@@ -30,6 +31,7 @@ Documentation = "https://github.com/wnz99/clean-code-tools/tree/main/docs"
 
 [dependency-groups]
 lint = [
+  "coverage[toml]>=7.13.0",
   "ruff>=0.15.0",
   "pylint>=4.0.0",
   "deptry>=0.25.1",
@@ -348,6 +350,16 @@ allow-any-import-level = []
 
 [tool.pylint.reports]
 score = false
+
+[tool.coverage.run]
+branch = true
+source = [
+  "src/python/mcp_server",
+]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
 
 [tool.pyright]
 include = ["src/python/clean_code_tools_pylint", "src/python/mcp_server", "scripts"]

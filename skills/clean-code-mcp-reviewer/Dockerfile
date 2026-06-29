@@ -11,7 +11,8 @@ WORKDIR /app
 RUN python -m pip install --no-cache-dir \
     "fastembed>=0.8.0" \
     "fastmcp>=2.0.0" \
-    "httpx>=0.27.0"
+    "httpx>=0.27.0" \
+    "pydantic>=2.12.0"
 
 COPY runtime/ /app/
 
