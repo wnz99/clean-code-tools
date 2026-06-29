@@ -2,18 +2,19 @@
 
 Use [configs/python.clean-code.pyproject.toml](../configs/python.clean-code.pyproject.toml) as a reusable `pyproject.toml` fragment for Python projects that want clean-code-oriented linting.
 
-The config intentionally mixes Ruff and Pylint:
+The config intentionally mixes Ruff, Pylint, and Deptry:
 
 - Ruff owns fast local checks: syntax/correctness, imports, bug-prone patterns, simple refactors, commented-out code, TODO shape, unused arguments, return-flow cleanup, magic-value comparisons, and Ruff-specific quality checks.
 - Pylint owns broader design pressure: too many module lines, arguments, locals, branches, returns, statements, nested blocks, public methods, instance attributes, duplicate code, cyclic imports, and the custom Python clean-code plugin.
+- Deptry owns dependency hygiene: unused dependencies, missing dependencies, and dependencies that should be declared in the correct dependency group.
 
 ## Install
 
 ```bash
-python -m pip install clean-code-tools-python
+python -m pip install clean-code-tools-python deptry
 ```
 
-Copy the config into a project root as `pyproject.toml`, or merge its `[tool.ruff]`, `[tool.ruff.lint]`, and `[tool.pylint.*]` sections into an existing `pyproject.toml`.
+Copy the config into a project root as `pyproject.toml`, or merge its `[tool.ruff]`, `[tool.ruff.lint]`, `[tool.pylint.*]`, and `[tool.deptry]` sections into an existing `pyproject.toml`.
 
 The Python package installs Ruff, Pylint, and the custom Pylint plugin module
 `clean_code_tools_pylint`. The canonical reusable config is packaged as
@@ -21,11 +22,15 @@ The Python package installs Ruff, Pylint, and the custom Pylint plugin module
 also keeps a copy at [configs/python.clean-code.pyproject.toml](../configs/python.clean-code.pyproject.toml)
 for local and JavaScript-package consumers.
 
+Deptry is not a runtime dependency of `clean-code-tools-python`; install it as a
+development dependency in consuming projects that use the Deptry section.
+
 Run:
 
 ```bash
 ruff check .
 pylint .
+deptry . --no-ansi
 ```
 
 ## Clean-Code Coverage
@@ -41,17 +46,17 @@ pylint .
 | File, function, and class size pressure, `CC-033..CC-059`, `CC-137..CC-142`, `CC-206` | Pylint `too-many-lines` plus design messages |
 | Duplication and coupling signals, `CC-004`, `CC-160`, `CC-214` | Pylint `duplicate-code`, `cyclic-import` |
 | Custom clean-code gaps matching the TypeScript plugin, `CC-043`, `CC-050`, `CC-068`, `CC-071`, `CC-073`, `CC-080`, `CC-083`, `CC-106`, `CC-107`, `CC-207`, `CC-208`, `CC-224`, `CC-245` | Pylint plugin `clean-code-*` messages |
+| Dependency hygiene and stale package declarations | Deptry dependency checks |
 
 ## Notes
 
-Ruff does not currently support project-local custom rule plugins, so the config only uses built-in Ruff rule families. Pylint is included because its design checker still provides useful clean-code pressure that Ruff either does not cover or would duplicate less flexibly.
+Ruff does not currently support project-local custom rule plugins, so the config only uses built-in Ruff rule families. Pylint is included because its design checker still provides useful clean-code pressure that Ruff either does not cover or would duplicate less flexibly. Deptry is included because dependency drift is a code-maintenance smell that lint rules usually miss.
 
 The thresholds are intentionally strict enough to act as early architecture-smell signals: modules warn above 300 lines, functions warn through statement count, and classes warn when public methods or attributes accumulate. Relax them for framework entrypoints, generated code, migrations, tests, and compatibility layers through project-local overrides.
 
-## Remaining Custom Candidates
-
-The remaining custom candidates are mostly domain-specific allowlists and
-project-specific suppression policies around the `clean-code-*` messages.
+Set `[tool.deptry].known_first_party` for packages that belong to the consuming
+repository, otherwise Deptry may treat internal imports as external dependency
+issues.
 
 See [python-pylint-custom-rules.md](./python-pylint-custom-rules.md) for the
 custom rule details.

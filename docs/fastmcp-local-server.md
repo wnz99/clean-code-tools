@@ -7,6 +7,7 @@ the lower-level chunk search for diagnostics.
 ## Install
 
 ```bash
+bun install
 uv sync
 ```
 

@@ -28,6 +28,11 @@ candidate contains:
 - `semantic_questions`
 - suggested `mcp_queries`
 
+Rule-to-query mappings come from the shared
+[clean-code review trigger catalog](../skills/clean-code-mcp-reviewer/catalog/clean_code_review_triggers.json).
+The candidate scanner and the agent-feedback hook both read that catalog so the
+same deterministic triggers lead to the same semantic review questions.
+
 ## Run
 
 From lint JSON files:
@@ -55,6 +60,11 @@ bun run clean-code:candidates -- \
   --ruff-command "uv run --group lint ruff check src/python/mcp_server --output-format=json" \
   --format markdown
 ```
+
+The `clean-code-mcp-reviewer` installer can also add an advisory pre-push hook.
+The hook runs the same candidate generation before Git pushes and prints
+semantic review prompts for the agent without blocking the push unless a project
+chooses a stricter mode.
 
 ## Trigger Policy
 

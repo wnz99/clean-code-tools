@@ -24,6 +24,12 @@ bun run semantic:chunks
 bun run semantic:ingest -- --reset
 ```
 
+If Weaviate is running on an alternate port, pass the matching URL:
+
+```bash
+bun run semantic:ingest -- --url http://127.0.0.1:18080 --reset
+```
+
 The default collection is `CleanCodeChunks`. The default embedding model is `BAAI/bge-small-en-v1.5`, running through `fastembed/cpu`.
 
 ## Search
