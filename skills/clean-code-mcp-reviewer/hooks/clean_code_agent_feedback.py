@@ -250,7 +250,10 @@ def print_feedback(findings: list[Finding], *, hook_name: str, limit: int, block
         return
     print(f"clean-code agent hook ({hook_name}): {len(findings)} semantic review candidate(s).")
     print("These are deterministic tripwires, not final findings.")
-    print("Agent instruction: use skill `clean-code-mcp-reviewer`; read each file first, then query MCP narrowly.")
+    print(
+        "Agent instruction: use skill `clean-code-mcp-reviewer` if available; "
+        "read each file first, then query MCP narrowly."
+    )
     for index, finding in enumerate(findings[:limit], start=1):
         location = f"{finding.file}:{finding.line}" if finding.line else finding.file
         print(f"{index}. {location} [{finding.tool}:{finding.rule}] {finding.message}")

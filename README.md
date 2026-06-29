@@ -1,9 +1,23 @@
 # Clean Code Tools
 
-Clean Code Tools is a companion toolkit for maintainability reviews. It ships
-deterministic lint rules, dependency/dead-code checks, and a local MCP server
-backed by a clean-code pattern corpus so an agent can turn static findings into
-targeted semantic review.
+Clean Code Tools helps teams and coding agents find maintainability problems
+that ordinary formatters and type checkers do not catch. It combines three
+layers:
+
+- Static lint rules for JavaScript, TypeScript, and Python that flag concrete
+  code shapes such as boolean flag arguments, output-argument mutation,
+  commented-out code, noisy comments, train-wreck object navigation, business
+  policy literals, long functions, deep nesting, and dependency drift.
+- A review-candidate generator that turns lint output into structured
+  `clean-code-review-candidates/v1` records. These records are deterministic
+  tripwires: they tell an agent which files and rules deserve a closer look.
+- A local FastMCP server backed by a clean-code pattern corpus. The MCP gives an
+  agent searchable guidance for deciding whether a lint tripwire is a real
+  design issue, what tradeoffs apply, and what refactor is likely to be useful.
+
+The intended workflow is: run static checks first, send selected candidates to
+an agent using the `clean-code-mcp-reviewer` skill when available, then apply
+only the recommendations that match the actual code and project conventions.
 
 The repo produces two package shapes:
 

@@ -92,7 +92,8 @@ this file for mixed responsibilities"; it does not mean "split the file."
 
 `skill` is always `clean-code-mcp-reviewer`. The candidate does not name
 language-specific skills because consuming systems may only install this repo's
-MCP reviewer skill.
+MCP reviewer skill. Agents should use `clean-code-mcp-reviewer` when it is
+available; if it is not installed, they should follow the same contract manually.
 
 Agents should:
 
