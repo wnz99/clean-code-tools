@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +99,7 @@ class PlannedCommand:
     label: str
     command: list[str]
     category: str
+    cwd: Path | None = None
 
 
 @dataclass
@@ -107,16 +109,19 @@ class ApplyOptions:
     hook_mode: str
     assume_yes: bool
     skip_install: bool
+    create_backup: bool
 
 
 @dataclass
 class Plan:
     repo: Path
+    git_root: Path
     languages: list[str] = field(default_factory=list)
     changes: list[Change] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     commands: list[PlannedCommand] = field(default_factory=list)
+    verification: list[PlannedCommand] = field(default_factory=list)
 
     @property
     def can_apply(self) -> bool:
@@ -141,31 +146,123 @@ def has_files(repo: Path, patterns: tuple[str, ...]) -> bool:
     return any(next(repo.glob(pattern), None) is not None for pattern in patterns)
 
 
+def git_root_for(path: Path) -> Path:
+    completed = run(["git", "rev-parse", "--show-toplevel"], cwd=path, check=False)
+    if completed.returncode != 0:
+        return path
+    return Path(completed.stdout.strip()).resolve()
+
+
 def is_git_dirty(repo: Path) -> bool:
-    if not (repo / ".git").exists():
+    git_root = git_root_for(repo)
+    if not (git_root / ".git").exists():
         return False
-    return bool(run(["git", "status", "--porcelain"], cwd=repo).stdout.strip())
+    return bool(run(["git", "status", "--porcelain"], cwd=git_root).stdout.strip())
+
+
+def backup_root(repo: Path) -> Path:
+    return git_root_for(repo) / ".git" / "clean-code-installer-backups"
+
+
+def create_rollback_point(repo: Path) -> list[str]:
+    git_root = git_root_for(repo)
+    if not (git_root / ".git").exists():
+        return ["No Git repository found; no rollback point was created."]
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    branch = f"backup/clean-code-install-{timestamp}"
+    run(["git", "branch", branch, "HEAD"], cwd=git_root)
+
+    notes = [
+        f"Created backup branch `{branch}` at the pre-install HEAD.",
+        f"Rollback committed installer changes with: git reset --hard {branch}",
+    ]
+    status = run(["git", "status", "--porcelain"], cwd=git_root).stdout
+    if not status.strip():
+        return notes
+
+    patch_dir = backup_root(repo) / timestamp
+    patch_dir.mkdir(parents=True, exist_ok=False)
+    (patch_dir / "status.txt").write_text(status)
+    unstaged = run(["git", "diff"], cwd=git_root).stdout
+    staged = run(["git", "diff", "--cached"], cwd=git_root).stdout
+    if unstaged:
+        (patch_dir / "unstaged.patch").write_text(unstaged)
+    if staged:
+        (patch_dir / "staged.patch").write_text(staged)
+    notes.append(f"Saved dirty-worktree patch backup under `{patch_dir}`.")
+    notes.append("Reapply saved user changes with `git apply <patch>` after rollback if needed.")
+    return notes
+
+
+def resolve_target_repo(repo: Path, target: str | None) -> Path:
+    if target is None:
+        return repo
+    target_path = (repo / target).resolve()
+    try:
+        target_path.relative_to(repo)
+    except ValueError as exc:
+        raise SystemExit("--target must stay inside --repo") from exc
+    if not target_path.exists():
+        raise SystemExit(f"Target path does not exist: {target_path}")
+    return target_path
+
+
+def package_manager_root(repo: Path, names: tuple[str, ...]) -> Path | None:
+    git_root = git_root_for(repo)
+    current = repo
+    while True:
+        if any((current / name).exists() for name in names):
+            return current
+        if current in (git_root, current.parent):
+            return None
+        current = current.parent
+
+
+def has_js_workspaces(repo: Path) -> bool:
+    if (repo / "pnpm-workspace.yaml").exists():
+        return True
+    package_json_path = repo / "package.json"
+    if not package_json_path.exists():
+        return False
+    payload = package_json(repo)
+    return "workspaces" in payload
+
+
+def js_package_manager_root(repo: Path) -> Path | None:
+    lock_root = package_manager_root(
+        repo,
+        ("bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock", "package-lock.json"),
+    )
+    if lock_root is not None:
+        return lock_root
+    return package_manager_root(repo, ("package.json",))
 
 
 def detect_js_package_manager(repo: Path) -> str | None:
-    if (repo / "bun.lock").exists() or (repo / "bun.lockb").exists():
-        return "bun"
-    if (repo / "pnpm-lock.yaml").exists():
-        return "pnpm"
-    if (repo / "yarn.lock").exists():
-        return "yarn"
-    if (repo / "package-lock.json").exists():
-        return "npm"
-    if (repo / "package.json").exists():
-        return "npm"
+    manager_root = js_package_manager_root(repo)
+    if manager_root is None:
+        return None
+    manager_markers = (
+        ("bun", ("bun.lock", "bun.lockb")),
+        ("pnpm", ("pnpm-lock.yaml",)),
+        ("yarn", ("yarn.lock",)),
+        ("npm", ("package-lock.json", "package.json")),
+    )
+    for manager, markers in manager_markers:
+        if any((manager_root / marker).exists() for marker in markers):
+            return manager
     return None
 
 
-def js_install_command(package_manager: str) -> list[str]:
+def js_install_command(package_manager: str, *, workspace_root: bool) -> list[str]:
     if package_manager == "bun":
         return ["bun", "add", "-d", *JS_DEV_PACKAGES]
     if package_manager == "pnpm":
-        return ["pnpm", "add", "-D", *JS_DEV_PACKAGES]
+        command = ["pnpm", "add", "-D"]
+        if workspace_root:
+            command.append("-w")
+        return [*command, *JS_DEV_PACKAGES]
     if package_manager == "yarn":
         return ["yarn", "add", "-D", *JS_DEV_PACKAGES]
     return ["npm", "install", "--save-dev", *JS_DEV_PACKAGES]
@@ -222,14 +319,27 @@ def plan_js(repo: Path, plan: Plan) -> None:
     package_manager = detect_js_package_manager(repo)
     if package_manager is None:
         return
+    manager_root = js_package_manager_root(repo)
+    manager_root = manager_root or repo
+    workspace_root = repo == manager_root and has_js_workspaces(repo)
     plan.languages.append("javascript/typescript")
+    if manager_root != repo:
+        plan.warnings.append(
+            f"Using JavaScript package manager from ancestor `{manager_root}` for target `{repo}`."
+        )
+    if workspace_root:
+        plan.warnings.append(
+            "JavaScript workspace root detected. Use --target <package-path> when the clean-code "
+            "config belongs to a nested package instead of the root workspace."
+        )
     if shutil.which(package_manager) is None:
         plan.blockers.append(f"Detected {package_manager}, but `{package_manager}` is not installed.")
     plan.commands.append(
         PlannedCommand(
             "install JavaScript/TypeScript clean-code dev packages",
-            js_install_command(package_manager),
+            js_install_command(package_manager, workspace_root=workspace_root),
             "dependency-install",
+            manager_root,
         )
     )
 
@@ -328,6 +438,7 @@ def plan_python(repo: Path, plan: Plan) -> None:
                 "install Python clean-code dev package",
                 command,
                 "dependency-install",
+                repo,
             )
         )
 
@@ -366,14 +477,43 @@ def plan_python(repo: Path, plan: Plan) -> None:
     )
 
 
+def add_verification_plan(plan: Plan) -> None:
+    scripts = package_json_scripts(plan.repo)
+    package_manager = detect_js_package_manager(plan.repo)
+    run_prefix = {
+        "bun": ["bun", "run"],
+        "pnpm": ["pnpm", "run"],
+        "yarn": ["yarn"],
+        "npm": ["npm", "run"],
+    }.get(package_manager or "npm", ["npm", "run"])
+    for name in ("lint", "test", "check", "check:knip", "check:fallow"):
+        if name in scripts:
+            plan.verification.append(
+                PlannedCommand(
+                    f"verify package script `{name}`",
+                    [*run_prefix, name],
+                    "verification",
+                    plan.repo,
+                )
+            )
+            break
+    if (plan.repo / "pyproject.toml").exists():
+        plan.verification.append(
+            PlannedCommand("verify Ruff config", ["ruff", "check", "."], "verification", plan.repo)
+        )
+    if not plan.verification:
+        plan.warnings.append("No obvious lint/test verification command was detected; run the repo's CI checks manually.")
+
+
 def build_plan(repo: Path, *, allow_dirty: bool, require_languages: bool = True) -> Plan:
-    plan = Plan(repo=repo)
+    plan = Plan(repo=repo, git_root=git_root_for(repo))
     if is_git_dirty(repo) and not allow_dirty:
         plan.blockers.append("Git worktree is dirty. Commit/stash first or rerun with --allow-dirty.")
     plan_js(repo, plan)
     plan_python(repo, plan)
     if require_languages and not plan.languages:
         plan.blockers.append("No JavaScript/TypeScript or Python project files were detected.")
+    add_verification_plan(plan)
     return plan
 
 
@@ -454,7 +594,8 @@ def plan_git_hooks(repo: Path, plan: Plan, *, choice: str, mode: str) -> None:
             "Git hooks were not selected. Use --git-hooks pre-push to install the recommended agent feedback hook."
         )
         return
-    if not (repo / ".git").exists():
+    git_root = git_root_for(repo)
+    if not (git_root / ".git").exists():
         plan.blockers.append("Git hooks requested, but this is not a Git working tree.")
         return
     missing_hook_files = [
@@ -465,7 +606,7 @@ def plan_git_hooks(repo: Path, plan: Plan, *, choice: str, mode: str) -> None:
     if missing_hook_files:
         plan.blockers.append(f"Hook support is missing from the skill: {', '.join(missing_hook_files)}")
         return
-    hooks_dir = git_hooks_dir(repo)
+    hooks_dir = git_hooks_dir(git_root)
     for hook_name in hooks:
         hook_path = hooks_dir / hook_name
         if hook_path.exists() and HOOK_MARKER not in hook_path.read_text(errors="ignore"):
@@ -577,7 +718,7 @@ def run_planned_commands(plan: Plan, *, category: str) -> None:
         if planned.category != category:
             continue
         print(f"running: {' '.join(planned.command)}")
-        run(planned.command, cwd=plan.repo)
+        run(planned.command, cwd=planned.cwd or plan.repo)
 
 
 def has_commands(plan: Plan, category: str) -> bool:
@@ -610,7 +751,7 @@ def apply_git_hooks(repo: Path, *, choice: str, mode: str) -> None:
     hooks = selected_hooks(choice)
     if not hooks:
         return
-    hooks_dir = git_hooks_dir(repo)
+    hooks_dir = git_hooks_dir(git_root_for(repo))
     hooks_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(HOOK_SOURCE, hooks_dir / HOOK_SCRIPT_NAME)
     shutil.copy2(HOOK_CATALOG_SOURCE, hooks_dir / HOOK_CATALOG_NAME)
@@ -623,6 +764,8 @@ def apply_git_hooks(repo: Path, *, choice: str, mode: str) -> None:
 
 def print_plan(plan: Plan) -> None:
     print(f"repo: {plan.repo}")
+    if plan.git_root != plan.repo:
+        print(f"git root: {plan.git_root}")
     print(f"languages: {', '.join(plan.languages) if plan.languages else 'none'}")
     if plan.changes:
         print("\nplanned changes:")
@@ -631,7 +774,15 @@ def print_plan(plan: Plan) -> None:
     if plan.commands:
         print("\nplanned commands:")
         for planned in plan.commands:
-            print(f"- {planned.label}: {' '.join(planned.command)}")
+            cwd = planned.cwd or plan.repo
+            cwd_note = f" (cwd: {cwd})" if cwd != plan.repo else ""
+            print(f"- {planned.label}: {' '.join(planned.command)}{cwd_note}")
+    if plan.verification:
+        print("\nrecommended verification after apply:")
+        for planned in plan.verification:
+            cwd = planned.cwd or plan.repo
+            cwd_note = f" (cwd: {cwd})" if cwd != plan.repo else ""
+            print(f"- {planned.label}: {' '.join(planned.command)}{cwd_note}")
     if plan.warnings:
         print("\nwarnings:")
         for warning in plan.warnings:
@@ -648,6 +799,10 @@ def print_plan(plan: Plan) -> None:
 def parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Install clean-code lint packages and config.")
     parser.add_argument("--repo", default=".", help="Repository root to inspect.")
+    parser.add_argument(
+        "--target",
+        help="Nested package/app path inside --repo to configure in a monorepo.",
+    )
     parser.add_argument("--apply", action="store_true", help="Apply safe changes and install packages.")
     parser.add_argument(
         "--yes",
@@ -655,6 +810,7 @@ def parser() -> argparse.ArgumentParser:
         help="Apply all planned host changes without interactive confirmation. Use only in automation.",
     )
     parser.add_argument("--allow-dirty", action="store_true", help="Allow applying with a dirty git worktree.")
+    parser.add_argument("--no-backup", action="store_true", help="Do not create a Git rollback point before --apply.")
     parser.add_argument("--skip-install", action="store_true", help="Modify files without running package installers.")
     parser.add_argument(
         "--mcp-runtime",
@@ -732,6 +888,10 @@ def start_runtime_if_approved(plan: Plan, *, assume_yes: bool) -> None:
 def apply_requested_setup(plan: Plan, options: ApplyOptions) -> None:
     if not plan.can_apply:
         raise SystemExit(1)
+    if options.create_backup:
+        print("\nrollback point:")
+        for note in create_rollback_point(plan.repo):
+            print(f"- {note}")
     apply_lint_config_if_approved(plan, assume_yes=options.assume_yes)
     apply_runtime_if_approved(
         plan.repo,
@@ -750,6 +910,12 @@ def apply_requested_setup(plan: Plan, options: ApplyOptions) -> None:
         assume_yes=options.assume_yes,
     )
     start_runtime_if_approved(plan, assume_yes=options.assume_yes)
+    if plan.verification:
+        print("\nrecommended verification:")
+        for planned in plan.verification:
+            cwd = planned.cwd or plan.repo
+            cwd_note = f" (cwd: {cwd})" if cwd != plan.repo else ""
+            print(f"- {' '.join(planned.command)}{cwd_note}")
     print("\nfinished: requested clean-code setup steps processed")
 
 
@@ -758,14 +924,15 @@ def main() -> None:
     repo = Path(args.repo).resolve()
     if not repo.exists():
         raise SystemExit(f"Repo does not exist: {repo}")
+    target_repo = resolve_target_repo(repo, args.target)
     wants_mcp_runtime = args.mcp_runtime or args.start_mcp_runtime
-    plan = build_plan(repo, allow_dirty=args.allow_dirty, require_languages=not wants_mcp_runtime)
+    plan = build_plan(target_repo, allow_dirty=args.allow_dirty, require_languages=not wants_mcp_runtime)
     if wants_mcp_runtime:
-        plan_mcp_runtime(repo, plan, start=args.start_mcp_runtime)
+        plan_mcp_runtime(target_repo, plan, start=args.start_mcp_runtime)
     hook_choice = resolve_hook_choice(args.git_hooks) if args.apply else args.git_hooks
     if hook_choice != "ask":
-        plan_git_hooks(repo, plan, choice=hook_choice, mode=args.git_hook_mode)
-    elif (repo / ".git").exists():
+        plan_git_hooks(target_repo, plan, choice=hook_choice, mode=args.git_hook_mode)
+    elif (plan.git_root / ".git").exists():
         plan.warnings.append(
             "Git hook setup will be offered during --apply. Use --git-hooks none to skip the prompt."
         )
@@ -779,6 +946,7 @@ def main() -> None:
                 hook_mode=args.git_hook_mode,
                 assume_yes=args.yes,
                 skip_install=args.skip_install,
+                create_backup=not args.no_backup,
             ),
         )
 

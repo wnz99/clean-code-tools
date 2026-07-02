@@ -43,6 +43,7 @@ Ruff, and Pylint configuration, and prints:
 - files that would be created or modified
 - blockers that require a manual integration strategy
 - warnings such as missing lint scripts
+- recommended verification commands to run after applying
 
 Apply only when the plan says `status: safe to apply` and the user has asked to
 proceed:
@@ -56,8 +57,14 @@ host-side action it offers: modifying lint config files, installing packages,
 copying the Docker MCP runtime, starting Docker services, or installing Git
 hooks. For non-interactive automation, pass `--yes` only after the user has
 already approved the whole plan and each selected setup category is intentional.
+Before applying, it creates a Git rollback point by default: a
+`backup/clean-code-install-<timestamp>` branch, plus patch files under
+`.git/clean-code-installer-backups/` when applying over a dirty worktree. Use
+`--no-backup` only when the user explicitly declines that safety net.
 
 Use `--repo /path/to/repo` when the current directory is not the target repo.
+Use `--target path/to/package` for monorepos when the clean-code config belongs
+to a nested package or app inside `--repo`.
 Use `--skip-install` only for dry integration tests or when the user wants file
 changes but will install dependencies separately. Use `--allow-dirty` only when
 the user explicitly accepts applying changes over an uncommitted worktree.
@@ -67,6 +74,10 @@ Installer behavior:
 - For JavaScript/TypeScript, install `clean-code-tools` plus its ESLint peer
   dependencies, `knip`, and `fallow` as dev dependencies using the detected
   package manager (`bun`, `pnpm`, `yarn`, or `npm`).
+- In a monorepo, prefer `--target` for package-local config. The installer can
+  detect package managers from ancestor workspace roots, warns when the root
+  workspace may not be the intended target, and uses the package manager's root
+  as the install command working directory when needed.
 - For a repo with no ESLint config, create `eslint.config.mjs` that exports the
   recommended clean-code preset.
 - For a simple flat ESLint `export default [...]` config, import the preset and
@@ -90,9 +101,10 @@ Installer behavior:
 - For existing Ruff or Pylint configuration, stop and recommend a manual merge
   instead of overwriting local lint policy.
 
-After applying, run the repo's normal lint/test commands. If the new static
-rules produce maintainability candidates, use the MCP workflow below to decide
-which findings deserve refactors.
+After applying, run the recommended verification commands printed by the
+installer, then run any broader repo CI checks the project expects. If the new
+static rules produce maintainability candidates, use the MCP workflow below to
+decide which findings deserve refactors.
 
 `check:knip`, `check:fallow`, and `deptry` are deterministic tripwires:
 
