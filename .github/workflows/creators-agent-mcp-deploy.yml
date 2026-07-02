@@ -1,0 +1,705 @@
+name: Agent MCP Deploy
+
+on:
+  push:
+    branches:
+      - develop
+      - staging
+    paths:
+      - 'services/python/creatorchat-mcp/**'
+      - 'services/python/shared-supabase/**'
+      - 'services/python/shared-weaviate/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/actions/deploy-coolify-app/action.yml'
+      - 'tools/ci/deploy-gates/**'
+      - '.github/workflows/creators-agent-mcp-deploy.yml'
+      - '.github/workflows/_reusable-runner-selector.yml'
+      - '.github/workflows/_reusable-slack-notify.yml'
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: Coolify MCP environment to deploy
+        required: true
+        type: choice
+        options:
+          - dev
+          - stg
+          - prd
+      force_rebuild:
+        description: Force Coolify to rebuild without cache
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: cc-agent-mcp-${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  UV_LINK_MODE: copy
+
+permissions:
+  contents: read
+
+jobs:
+  choose-runner:
+    uses: ./.github/workflows/_reusable-runner-selector.yml
+
+  validate-ref:
+    needs: choose-runner
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    permissions:
+      contents: read
+    steps:
+      - name: Validate deployment ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            exit 0
+          fi
+          case "${{ inputs.target_environment }}" in
+            dev)
+              expected_ref="develop"
+              ;;
+            stg)
+              expected_ref="staging"
+              ;;
+            prd)
+              expected_ref="main"
+              ;;
+            *)
+              echo "Unsupported target environment: ${{ inputs.target_environment }}" >&2
+              exit 1
+              ;;
+          esac
+          if [ "${GITHUB_REF_NAME}" != "${expected_ref}" ]; then
+            echo "Manual ${{ inputs.target_environment }} deploys must run from ${expected_ref}; got ${GITHUB_REF_NAME}." >&2
+            exit 1
+          fi
+
+  detect-changes:
+    needs: choose-runner
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    permissions:
+      contents: read
+    outputs:
+      mcp_changed: ${{ steps.detect.outputs.mcp_changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect affected MCP service
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base_sha="${{ github.event.before }}"
+          head_sha="${{ github.sha }}"
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          fi
+
+          if [ -z "${base_sha}" ] || [ "${base_sha}" = "0000000000000000000000000000000000000000" ]; then
+            base_sha="$(git merge-base "origin/${{ github.ref_name }}" "${head_sha}")"
+          fi
+
+          node tools/ci/deploy-gates/deploy-gates.mjs detect \
+            --target creatorchat-mcp \
+            --event-name "${{ github.event_name }}" \
+            --base "${base_sha}" \
+            --head "${head_sha}" >> "${GITHUB_OUTPUT}"
+
+  version:
+    needs: choose-runner
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    name: Resolve MCP Version
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      revision: ${{ steps.resolve.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GIT_TOKEN }}
+
+      - name: Calculate project semver
+        id: project_version
+        uses: paulhatch/semantic-version@v6.0.2
+        with:
+          tag_prefix: cc-agent-mcp-v
+          major_pattern: '/!:|BREAKING CHANGE:/'
+          minor_pattern: '/^feat(\(.+\))?:/'
+          version_format: '${major}.${minor}.${patch}'
+          change_path: 'services/python/creatorchat-mcp services/python/shared-supabase services/python/shared-weaviate'
+          search_commit_body: true
+          enable_prerelease_mode: false
+
+      - name: Create project tag on develop merge
+        if: >-
+          github.ref_name == 'develop' &&
+          startsWith(github.event.head_commit.message, 'Merge pull request ') &&
+          steps.project_version.outputs.changed == 'true' &&
+          steps.project_version.outputs.is_tagged != 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate \
+            --message "Release ${{ steps.project_version.outputs.version_tag }}" \
+            "${{ steps.project_version.outputs.version_tag }}" \
+            "${GITHUB_SHA}"
+          git push origin "refs/tags/${{ steps.project_version.outputs.version_tag }}"
+
+      - name: Resolve deploy version
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          computed_version="${{ steps.project_version.outputs.version }}"
+          version="${computed_version}"
+          if ! [[ "${{ github.ref_name }}" == "develop" && "${{ steps.project_version.outputs.changed }}" == "true" ]]; then
+            git fetch --force --tags origin \
+              +refs/heads/develop:refs/remotes/origin/develop
+
+            tag="$(
+              git for-each-ref --format='%(refname:short) %(*objectname)' 'refs/tags/cc-agent-mcp-v*' |
+                while read -r candidate tagged_commit; do
+                  if [ -z "${tagged_commit}" ]; then
+                    tagged_commit="$(git rev-list -n 1 "${candidate}")"
+                  fi
+                  if git merge-base --is-ancestor "${tagged_commit}" HEAD &&
+                    git merge-base --is-ancestor "${tagged_commit}" refs/remotes/origin/develop; then
+                    printf '%s\n' "${candidate}"
+                  fi
+                done |
+                sort -V |
+                tail -n 1
+            )"
+            tagged_version="${tag#cc-agent-mcp-v}"
+            if [ -z "${tagged_version}" ]; then
+              echo "No released cc-agent-mcp tag from develop is contained in ${GITHUB_SHA}." >&2
+              echo "Merge a tagged develop commit into staging/prd before deploying." >&2
+              exit 1
+            fi
+            version="${tagged_version}"
+          fi
+          if [ -z "${version}" ]; then
+            version="$(python -c 'import pathlib, tomllib; data = tomllib.loads(pathlib.Path("services/python/creatorchat-mcp/pyproject.toml").read_text()); print(data["project"]["version"])')"
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "revision=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+
+  check:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'develop' && needs.detect-changes.outputs.mcp_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'dev')
+    needs:
+      - choose-runner
+      - detect-changes
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: services/python/creatorchat-mcp
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.9.16
+          enable-cache: true
+          prune-cache: false
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Sync workspace dependencies
+        run: uv sync --frozen
+
+      - name: Quality gate
+        env:
+          CC_AGENT_MCP_LIVE_E2E: '0'
+          MCP_TEST_REDIS_URL: ''
+        run: |
+          uv run poe format-check
+          uv run poe lint
+          uv run poe typecheck
+          uv run python - <<'PY'
+          import ast
+          from pathlib import Path
+          import subprocess
+
+          def run_pytest(args: list[str]) -> int:
+              return subprocess.run(["uv", "run", "pytest", *args], check=False).returncode
+
+          http_test_path = Path("tests/test_mcp_http_integration.py")
+          module = ast.parse(http_test_path.read_text(encoding="utf-8"))
+          http_tests = [
+              f"{http_test_path.as_posix()}::{node.name}"
+              for node in module.body
+              if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+              and node.name.startswith("test_")
+          ]
+          if not http_tests:
+              raise SystemExit("No MCP HTTP integration tests collected")
+          for test_id in http_tests:
+              result = run_pytest([test_id])
+              if result != 0:
+                  raise SystemExit(result)
+
+          excluded = {
+              Path("tests/test_mcp_client_smoke.py"),
+              Path("tests/test_mcp_http_integration.py"),
+          }
+          no_test_files = {Path("tests/test_retrieval_gateways.py")}
+          for test_file in sorted(Path("tests").rglob("test_*.py")):
+              if test_file in excluded:
+                  continue
+              result = run_pytest([str(test_file)])
+              if result == 5 and test_file in no_test_files:
+                  continue
+              if result != 0:
+                  raise SystemExit(result)
+          PY
+          uv run pytest tests/test_mcp_client_smoke.py
+
+      - name: MCP Docker build smoke
+        working-directory: ${{ github.workspace }}
+        run: docker buildx build --output=type=cacheonly -f services/python/creatorchat-mcp/Dockerfile .
+
+  deploy-dev:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'develop' && needs.detect-changes.outputs.mcp_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'dev')
+    needs:
+      - choose-runner
+      - detect-changes
+      - validate-ref
+      - check
+      - version
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    environment: dev
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy dev app in Coolify
+        uses: ./.github/actions/deploy-coolify-app
+        with:
+          endpoint: ${{ vars.OT_COOLIFY_ENDPOINT }}
+          token: ${{ secrets.OT_COOLIFY_TOKEN }}
+          app-uuid: ${{ vars.OT_COOLIFY_CC_AGENT_MCP_DEV_UUID || vars.OT_COOLIFY_MCP_DEV_UUID }}
+          force-rebuild: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+          dockerfile-location: /services/python/creatorchat-mcp/Dockerfile
+          env-keys: |
+            CC_AGENT_MCP_VERSION
+            CC_AGENT_MCP_REVISION
+            SERVICE_NAME
+            APP_ENV
+            OBSERVABILITY_ENABLED
+            SENTRY_ENVIRONMENT
+            SENTRY_RELEASE
+            LOGFIRE_TOKEN
+            LOGFIRE_BASE_URL
+            LOGFIRE_SERVICE_NAME
+            LOGFIRE_ENVIRONMENT
+            LOGFIRE_SEND_TO_LOGFIRE
+            SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+            MCP_SUPABASE_AUTH_ENABLED
+            MCP_SUPABASE_AUTH_AUDIENCE
+            MCP_SUPABASE_AUTH_ISSUER
+            MCP_SUPABASE_AUTH_JWKS_URI
+            MCP_BASE_URL
+            MCP_OAUTH_DEFAULT_USER_ID
+            MCP_DEVELOPER_OAUTH_CODE
+            MCP_OAUTH_STATE_BACKEND
+            MCP_REDIS_URL
+            MCP_JWT_SECRET
+            VERTEX_PROJECT_ID
+            VERTEX_REGION
+            VERTEX_CREDENTIALS_BASE64
+            RERANKING_ENABLED
+            RERANKING_PROVIDER
+            GOOGLE_RANKING_PROJECT_ID
+            GOOGLE_RANKING_LOCATION
+            GOOGLE_RANKING_MODEL
+            GOOGLE_RANKING_TOP_N
+            GOOGLE_RANKING_TIMEOUT_SECONDS
+            CHUNK_RERANKING_ENABLED
+            CHUNK_GOOGLE_RANKING_TOP_N
+            CHUNK_GOOGLE_RANKING_TIMEOUT_SECONDS
+            ITEM_RERANKING_ENABLED
+            ITEM_GOOGLE_RANKING_TOP_N
+            ITEM_GOOGLE_RANKING_TIMEOUT_SECONDS
+            WEAVIATE_URL
+            WEAVIATE_QUERY_TRANSPORT
+            WEAVIATE_REST_QUERY_ENABLED
+            WEAVIATE_GRPC_HOST
+            WEAVIATE_GRPC_PORT
+            WEAVIATE_GRPC_SECURE
+            PORT
+        env:
+          CC_AGENT_MCP_VERSION: ${{ needs.version.outputs.version }}
+          CC_AGENT_MCP_REVISION: ${{ needs.version.outputs.revision }}
+          SERVICE_NAME: cc-agent-mcp
+          APP_ENV: dev
+          OBSERVABILITY_ENABLED: 'false'
+          SENTRY_ENVIRONMENT: dev
+          SENTRY_RELEASE: cc-agent-mcp@${{ needs.version.outputs.version }}+${{ needs.version.outputs.revision }}
+          LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}
+          LOGFIRE_BASE_URL: https://logfire-eu.pydantic.dev
+          LOGFIRE_SERVICE_NAME: cc-agent-mcp
+          LOGFIRE_ENVIRONMENT: dev
+          LOGFIRE_SEND_TO_LOGFIRE: 'true'
+          SUPABASE_URL: ${{ vars.OT_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.OT_SUPABASE_SERVICE_ROLE_KEY }}
+          MCP_SUPABASE_AUTH_ENABLED: ${{ vars.OT_MCP_SUPABASE_AUTH_ENABLED }}
+          MCP_SUPABASE_AUTH_AUDIENCE: ${{ vars.OT_MCP_SUPABASE_AUTH_AUDIENCE }}
+          MCP_SUPABASE_AUTH_ISSUER: ${{ vars.OT_MCP_SUPABASE_AUTH_ISSUER }}
+          MCP_SUPABASE_AUTH_JWKS_URI: ${{ vars.OT_MCP_SUPABASE_AUTH_JWKS_URI }}
+          MCP_BASE_URL: https://cc-agent-mcp-dev.app.wnz.sh
+          MCP_OAUTH_DEFAULT_USER_ID: ${{ vars.OT_MCP_OAUTH_DEFAULT_USER_ID }}
+          MCP_DEVELOPER_OAUTH_CODE: ${{ secrets.OT_MCP_DEVELOPER_OAUTH_CODE }}
+          MCP_OAUTH_STATE_BACKEND: redis
+          MCP_REDIS_URL: ${{ secrets.OT_MCP_REDIS_URL }}
+          MCP_JWT_SECRET: ${{ secrets.OT_MCP_JWT_SECRET }}
+          VERTEX_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          VERTEX_REGION: ${{ vars.OT_VERTEX_REGION }}
+          VERTEX_CREDENTIALS_BASE64: ${{ secrets.OT_VERTEX_CREDENTIALS_BASE64 }}
+          RERANKING_ENABLED: 'true'
+          RERANKING_PROVIDER: google
+          GOOGLE_RANKING_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          GOOGLE_RANKING_LOCATION: global
+          GOOGLE_RANKING_MODEL: semantic-ranker-default@latest
+          GOOGLE_RANKING_TOP_N: '50'
+          GOOGLE_RANKING_TIMEOUT_SECONDS: '2.0'
+          CHUNK_RERANKING_ENABLED: 'true'
+          CHUNK_GOOGLE_RANKING_TOP_N: '50'
+          CHUNK_GOOGLE_RANKING_TIMEOUT_SECONDS: '2.0'
+          ITEM_RERANKING_ENABLED: 'true'
+          ITEM_GOOGLE_RANKING_TOP_N: '50'
+          ITEM_GOOGLE_RANKING_TIMEOUT_SECONDS: '2.0'
+          WEAVIATE_URL: https://cc-weaviate-dev.app.wnz.sh
+          WEAVIATE_QUERY_TRANSPORT: sdk
+          WEAVIATE_REST_QUERY_ENABLED: 'false'
+          WEAVIATE_GRPC_HOST: cc-weaviate-grpc-dev.app.wnz.sh
+          WEAVIATE_GRPC_PORT: '443'
+          WEAVIATE_GRPC_SECURE: 'true'
+          PORT: '8000'
+
+  notify-dev:
+    if: >-
+      always() &&
+      (
+        (github.event_name == 'push' && github.ref_name == 'develop') ||
+        (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'dev')
+      )
+    needs:
+      - choose-runner
+      - version
+      - deploy-dev
+    uses: ./.github/workflows/_reusable-slack-notify.yml
+    with:
+      runs-on-json: ${{ needs.choose-runner.outputs.runs-on-json }}
+      environment: dev
+      component: CC Agent MCP
+      action: deploy
+      status: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || contains(needs.*.result, 'skipped') && 'skipped' || 'success' }}
+      version: ${{ needs.version.outputs.version }}
+      revision: ${{ needs.version.outputs.revision }}
+      details: Coolify deployment
+    secrets:
+      slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_OPS_DEV }}
+
+  deploy-stg:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'staging' && needs.detect-changes.outputs.mcp_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'stg')
+    needs:
+      - choose-runner
+      - detect-changes
+      - validate-ref
+      - version
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    environment: stg
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy staging app in Coolify
+        uses: ./.github/actions/deploy-coolify-app
+        with:
+          endpoint: ${{ vars.OT_COOLIFY_ENDPOINT }}
+          token: ${{ secrets.OT_COOLIFY_TOKEN }}
+          app-uuid: ${{ vars.OT_COOLIFY_CC_AGENT_MCP_STG_UUID || vars.OT_COOLIFY_MCP_STG_UUID }}
+          force-rebuild: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+          dockerfile-location: /services/python/creatorchat-mcp/Dockerfile
+          env-keys: |
+            CC_AGENT_MCP_VERSION
+            CC_AGENT_MCP_REVISION
+            SERVICE_NAME
+            APP_ENV
+            OBSERVABILITY_ENABLED
+            SENTRY_DSN
+            SENTRY_ENVIRONMENT
+            SENTRY_RELEASE
+            LOGFIRE_TOKEN
+            LOGFIRE_BASE_URL
+            LOGFIRE_SERVICE_NAME
+            LOGFIRE_ENVIRONMENT
+            LOGFIRE_SEND_TO_LOGFIRE
+            SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+            MCP_SUPABASE_AUTH_ENABLED
+            MCP_SUPABASE_AUTH_AUDIENCE
+            MCP_SUPABASE_AUTH_ISSUER
+            MCP_SUPABASE_AUTH_JWKS_URI
+            MCP_BASE_URL
+            MCP_OAUTH_DEFAULT_USER_ID
+            MCP_DEVELOPER_OAUTH_CODE
+            MCP_OAUTH_STATE_BACKEND
+            MCP_REDIS_URL
+            MCP_JWT_SECRET
+            VERTEX_PROJECT_ID
+            VERTEX_REGION
+            VERTEX_CREDENTIALS_BASE64
+            RERANKING_ENABLED
+            RERANKING_PROVIDER
+            GOOGLE_RANKING_PROJECT_ID
+            GOOGLE_RANKING_LOCATION
+            GOOGLE_RANKING_MODEL
+            GOOGLE_RANKING_TOP_N
+            GOOGLE_RANKING_TIMEOUT_SECONDS
+            CHUNK_RERANKING_ENABLED
+            CHUNK_GOOGLE_RANKING_TOP_N
+            CHUNK_GOOGLE_RANKING_TIMEOUT_SECONDS
+            ITEM_RERANKING_ENABLED
+            ITEM_GOOGLE_RANKING_TOP_N
+            ITEM_GOOGLE_RANKING_TIMEOUT_SECONDS
+            WEAVIATE_URL
+            WEAVIATE_QUERY_TRANSPORT
+            WEAVIATE_REST_QUERY_ENABLED
+            WEAVIATE_GRPC_HOST
+            WEAVIATE_GRPC_PORT
+            WEAVIATE_GRPC_SECURE
+            PORT
+        env:
+          CC_AGENT_MCP_VERSION: ${{ needs.version.outputs.version }}
+          CC_AGENT_MCP_REVISION: ${{ needs.version.outputs.revision }}
+          SERVICE_NAME: cc-agent-mcp
+          APP_ENV: stg
+          OBSERVABILITY_ENABLED: 'true'
+          SENTRY_DSN: ${{ secrets.SENTRY_CC_AGENT_MCP_DSN || secrets.SENTRY_CC_CREATORCHAT_MCP_DSN }}
+          SENTRY_ENVIRONMENT: stg
+          SENTRY_RELEASE: cc-agent-mcp@${{ needs.version.outputs.version }}+${{ needs.version.outputs.revision }}
+          LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}
+          LOGFIRE_BASE_URL: https://logfire-eu.pydantic.dev
+          LOGFIRE_SERVICE_NAME: cc-agent-mcp
+          LOGFIRE_ENVIRONMENT: stg
+          LOGFIRE_SEND_TO_LOGFIRE: 'true'
+          SUPABASE_URL: ${{ vars.OT_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.OT_SUPABASE_SERVICE_ROLE_KEY }}
+          MCP_SUPABASE_AUTH_ENABLED: ${{ vars.OT_MCP_SUPABASE_AUTH_ENABLED }}
+          MCP_SUPABASE_AUTH_AUDIENCE: ${{ vars.OT_MCP_SUPABASE_AUTH_AUDIENCE }}
+          MCP_SUPABASE_AUTH_ISSUER: ${{ vars.OT_MCP_SUPABASE_AUTH_ISSUER }}
+          MCP_SUPABASE_AUTH_JWKS_URI: ${{ vars.OT_MCP_SUPABASE_AUTH_JWKS_URI }}
+          MCP_BASE_URL: https://cc-agent-mcp-stg.app.wnz.sh
+          MCP_OAUTH_DEFAULT_USER_ID: ${{ vars.OT_MCP_OAUTH_DEFAULT_USER_ID }}
+          MCP_DEVELOPER_OAUTH_CODE: ${{ secrets.OT_MCP_DEVELOPER_OAUTH_CODE }}
+          MCP_OAUTH_STATE_BACKEND: redis
+          MCP_REDIS_URL: ${{ secrets.OT_MCP_REDIS_URL }}
+          MCP_JWT_SECRET: ${{ secrets.OT_MCP_JWT_SECRET }}
+          VERTEX_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          VERTEX_REGION: ${{ vars.OT_VERTEX_REGION }}
+          VERTEX_CREDENTIALS_BASE64: ${{ secrets.OT_VERTEX_CREDENTIALS_BASE64 }}
+          RERANKING_ENABLED: 'true'
+          RERANKING_PROVIDER: google
+          GOOGLE_RANKING_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          GOOGLE_RANKING_LOCATION: global
+          GOOGLE_RANKING_MODEL: semantic-ranker-default@latest
+          GOOGLE_RANKING_TOP_N: '50'
+          GOOGLE_RANKING_TIMEOUT_SECONDS: '2.0'
+          CHUNK_RERANKING_ENABLED: 'true'
+          CHUNK_GOOGLE_RANKING_TOP_N: '50'
+          CHUNK_GOOGLE_RANKING_TIMEOUT_SECONDS: '2.0'
+          ITEM_RERANKING_ENABLED: 'true'
+          ITEM_GOOGLE_RANKING_TOP_N: '50'
+          ITEM_GOOGLE_RANKING_TIMEOUT_SECONDS: '2.0'
+          WEAVIATE_URL: https://cc-weaviate-stg.app.wnz.sh
+          WEAVIATE_QUERY_TRANSPORT: sdk
+          WEAVIATE_REST_QUERY_ENABLED: 'false'
+          WEAVIATE_GRPC_HOST: cc-weaviate-grpc-stg.app.wnz.sh
+          WEAVIATE_GRPC_PORT: '443'
+          WEAVIATE_GRPC_SECURE: 'true'
+          PORT: '8000'
+
+  notify-stg:
+    if: >-
+      always() &&
+      (
+        (github.event_name == 'push' && github.ref_name == 'staging') ||
+        (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'stg')
+      )
+    needs:
+      - choose-runner
+      - version
+      - deploy-stg
+    uses: ./.github/workflows/_reusable-slack-notify.yml
+    with:
+      runs-on-json: ${{ needs.choose-runner.outputs.runs-on-json }}
+      environment: stg
+      component: CC Agent MCP
+      action: deploy
+      status: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || contains(needs.*.result, 'skipped') && 'skipped' || 'success' }}
+      version: ${{ needs.version.outputs.version }}
+      revision: ${{ needs.version.outputs.revision }}
+      details: Coolify deployment
+    secrets:
+      slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_OPS_STG }}
+
+  deploy-prd:
+    if: github.event_name == 'workflow_dispatch' && inputs.target_environment == 'prd'
+    needs:
+      - choose-runner
+      - detect-changes
+      - validate-ref
+      - version
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    environment: prd
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy production app in Coolify
+        uses: ./.github/actions/deploy-coolify-app
+        with:
+          endpoint: ${{ vars.OT_COOLIFY_ENDPOINT }}
+          token: ${{ secrets.OT_COOLIFY_TOKEN }}
+          app-uuid: ${{ vars.OT_COOLIFY_CC_AGENT_MCP_PRD_SRV01_UUID || 'e10tnujaymd4bjsb3yjb2z2b' }}
+          force-rebuild: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+          dockerfile-location: /services/python/creatorchat-mcp/Dockerfile
+          env-keys: |
+            CC_AGENT_MCP_VERSION
+            CC_AGENT_MCP_REVISION
+            SERVICE_NAME
+            APP_ENV
+            OBSERVABILITY_ENABLED
+            SENTRY_DSN
+            SENTRY_ENVIRONMENT
+            SENTRY_RELEASE
+            LOGFIRE_TOKEN
+            LOGFIRE_BASE_URL
+            LOGFIRE_SERVICE_NAME
+            LOGFIRE_ENVIRONMENT
+            LOGFIRE_SEND_TO_LOGFIRE
+            SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+            MCP_SUPABASE_AUTH_ENABLED
+            MCP_SUPABASE_AUTH_AUDIENCE
+            MCP_SUPABASE_AUTH_ISSUER
+            MCP_SUPABASE_AUTH_JWKS_URI
+            MCP_BASE_URL
+            MCP_OAUTH_STATE_BACKEND
+            VERTEX_PROJECT_ID
+            VERTEX_REGION
+            VERTEX_CREDENTIALS_BASE64
+            RERANKING_ENABLED
+            RERANKING_PROVIDER
+            GOOGLE_RANKING_PROJECT_ID
+            GOOGLE_RANKING_LOCATION
+            GOOGLE_RANKING_MODEL
+            GOOGLE_RANKING_TOP_N
+            GOOGLE_RANKING_TIMEOUT_SECONDS
+            CHUNK_RERANKING_ENABLED
+            CHUNK_GOOGLE_RANKING_TOP_N
+            CHUNK_GOOGLE_RANKING_TIMEOUT_SECONDS
+            ITEM_RERANKING_ENABLED
+            ITEM_GOOGLE_RANKING_TOP_N
+            ITEM_GOOGLE_RANKING_TIMEOUT_SECONDS
+            WEAVIATE_URL
+            WEAVIATE_QUERY_TRANSPORT
+            WEAVIATE_REST_QUERY_ENABLED
+            WEAVIATE_GRPC_HOST
+            WEAVIATE_GRPC_PORT
+            WEAVIATE_GRPC_SECURE
+            PORT
+        env:
+          CC_AGENT_MCP_VERSION: ${{ needs.version.outputs.version }}
+          CC_AGENT_MCP_REVISION: ${{ needs.version.outputs.revision }}
+          SERVICE_NAME: cc-agent-mcp
+          APP_ENV: prd
+          OBSERVABILITY_ENABLED: 'true'
+          SENTRY_DSN: ${{ secrets.SENTRY_CC_AGENT_MCP_DSN || secrets.SENTRY_CC_CREATORCHAT_MCP_DSN }}
+          SENTRY_ENVIRONMENT: prd
+          SENTRY_RELEASE: cc-agent-mcp@${{ needs.version.outputs.version }}+${{ needs.version.outputs.revision }}
+          LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}
+          LOGFIRE_BASE_URL: https://logfire-eu.pydantic.dev
+          LOGFIRE_SERVICE_NAME: cc-agent-mcp
+          LOGFIRE_ENVIRONMENT: prd
+          LOGFIRE_SEND_TO_LOGFIRE: 'true'
+          SUPABASE_URL: ${{ vars.OT_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.OT_SUPABASE_SERVICE_ROLE_KEY }}
+          MCP_SUPABASE_AUTH_ENABLED: ${{ vars.OT_MCP_SUPABASE_AUTH_ENABLED }}
+          MCP_SUPABASE_AUTH_AUDIENCE: ${{ vars.OT_MCP_SUPABASE_AUTH_AUDIENCE }}
+          MCP_SUPABASE_AUTH_ISSUER: ${{ vars.OT_MCP_SUPABASE_AUTH_ISSUER }}
+          MCP_SUPABASE_AUTH_JWKS_URI: ${{ vars.OT_MCP_SUPABASE_AUTH_JWKS_URI }}
+          MCP_BASE_URL: https://cc-agent-mcp.creatorchat.live
+          MCP_OAUTH_STATE_BACKEND: memory
+          VERTEX_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          VERTEX_REGION: ${{ vars.OT_VERTEX_REGION }}
+          VERTEX_CREDENTIALS_BASE64: ${{ secrets.OT_VERTEX_CREDENTIALS_BASE64 }}
+          RERANKING_ENABLED: 'true'
+          RERANKING_PROVIDER: google
+          GOOGLE_RANKING_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          GOOGLE_RANKING_LOCATION: global
+          GOOGLE_RANKING_MODEL: semantic-ranker-default@latest
+          GOOGLE_RANKING_TOP_N: '50'
+          GOOGLE_RANKING_TIMEOUT_SECONDS: '2.0'
+          CHUNK_RERANKING_ENABLED: 'true'
+          CHUNK_GOOGLE_RANKING_TOP_N: '50'
+          CHUNK_GOOGLE_RANKING_TIMEOUT_SECONDS: '2.0'
+          ITEM_RERANKING_ENABLED: 'true'
+          ITEM_GOOGLE_RANKING_TOP_N: '50'
+          ITEM_GOOGLE_RANKING_TIMEOUT_SECONDS: '2.0'
+          WEAVIATE_URL: https://cc-weaviate.creatorchat.live
+          WEAVIATE_QUERY_TRANSPORT: sdk
+          WEAVIATE_REST_QUERY_ENABLED: 'false'
+          WEAVIATE_GRPC_HOST: cc-weaviate-grpc.creatorchat.live
+          WEAVIATE_GRPC_PORT: '443'
+          WEAVIATE_GRPC_SECURE: 'true'
+          PORT: '8000'
+
+  notify-prd:
+    if: >-
+      always() &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.target_environment == 'prd'
+    needs:
+      - choose-runner
+      - version
+      - deploy-prd
+    uses: ./.github/workflows/_reusable-slack-notify.yml
+    with:
+      runs-on-json: ${{ needs.choose-runner.outputs.runs-on-json }}
+      environment: prd
+      component: CC Agent MCP
+      action: deploy
+      status: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || contains(needs.*.result, 'skipped') && 'skipped' || 'success' }}
+      version: ${{ needs.version.outputs.version }}
+      revision: ${{ needs.version.outputs.revision }}
+      details: Coolify deployment
+    secrets:
+      slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_OPS_PRD }}
