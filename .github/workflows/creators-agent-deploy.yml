@@ -1,0 +1,999 @@
+name: Agent Deploy
+
+on:
+  push:
+    branches:
+      - develop
+      - staging
+    paths:
+      - 'services/python/creators-agent/**'
+      - 'services/python/creators-agent-deepeval/**'
+      - 'services/python/shared-supabase/**'
+      - 'services/python/shared-weaviate/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/actions/deploy-coolify-app/action.yml'
+      - 'tools/ci/deploy-gates/**'
+      - '.github/workflows/creators-agent-deploy.yml'
+      - '.github/workflows/_reusable-runner-selector.yml'
+      - '.github/workflows/_reusable-slack-notify.yml'
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: Coolify cc-agent environment to deploy
+        required: true
+        type: choice
+        options:
+          - dev
+          - stg
+          - prd
+      force_rebuild:
+        description: Force Coolify to rebuild without cache
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: cc-agent-${{ github.event_name == 'workflow_dispatch' && inputs.target_environment || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  UV_LINK_MODE: copy
+
+permissions:
+  contents: read
+
+jobs:
+  choose-runner:
+    uses: ./.github/workflows/_reusable-runner-selector.yml
+  validate-ref:
+    needs: choose-runner
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    permissions:
+      contents: read
+    steps:
+      - name: Validate deployment ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
+            exit 0
+          fi
+          case "${{ inputs.target_environment }}" in
+            dev)
+              expected_ref="develop"
+              ;;
+            stg)
+              expected_ref="staging"
+              ;;
+            prd)
+              expected_ref="main"
+              ;;
+            *)
+              echo "Unsupported target environment: ${{ inputs.target_environment }}" >&2
+              exit 1
+              ;;
+          esac
+          if [ "${GITHUB_REF_NAME}" != "${expected_ref}" ]; then
+            echo "Manual ${{ inputs.target_environment }} deploys must run from ${expected_ref}; got ${GITHUB_REF_NAME}." >&2
+            exit 1
+          fi
+  detect-changes:
+    needs: choose-runner
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    permissions:
+      contents: read
+    outputs:
+      backend_changed: ${{ steps.detect.outputs.backend_changed }}
+      gradio_changed: ${{ steps.detect.outputs.gradio_changed }}
+      deepeval_changed: ${{ steps.detect.outputs.deepeval_changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect affected CC Agent components
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base_sha="${{ github.event.before }}"
+          head_sha="${{ github.sha }}"
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          fi
+
+          if [ -z "${base_sha}" ] || [ "${base_sha}" = "0000000000000000000000000000000000000000" ]; then
+            base_sha="$(git merge-base "origin/${{ github.ref_name }}" "${head_sha}")"
+          fi
+
+          node tools/ci/deploy-gates/deploy-gates.mjs detect \
+            --target creators-agent \
+            --event-name "${{ github.event_name }}" \
+            --base "${base_sha}" \
+            --head "${head_sha}" >> "${GITHUB_OUTPUT}"
+
+  version:
+    needs: choose-runner
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    name: Resolve Agent Version
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      revision: ${{ steps.resolve.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GIT_TOKEN }}
+
+      - name: Calculate project semver
+        id: project_version
+        uses: paulhatch/semantic-version@v6.0.2
+        with:
+          tag_prefix: cc-agent-v
+          major_pattern: '/!:|BREAKING CHANGE:/'
+          minor_pattern: '/^feat(\(.+\))?:/'
+          version_format: '${major}.${minor}.${patch}'
+          change_path: 'services/python/creators-agent/src/agent services/python/creators-agent/src/server services/python/creators-agent/src/gradio-rag-app services/python/creators-agent/Dockerfile.backend services/python/creators-agent/Dockerfile.frontend services/python/creators-agent/pyproject.toml services/python/creators-agent-deepeval services/python/shared-supabase services/python/shared-weaviate'
+          search_commit_body: true
+          enable_prerelease_mode: false
+
+      - name: Create project tag on develop merge
+        if: >-
+          github.ref_name == 'develop' &&
+          startsWith(github.event.head_commit.message, 'Merge pull request ') &&
+          steps.project_version.outputs.changed == 'true' &&
+          steps.project_version.outputs.is_tagged != 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate \
+            --message "Release ${{ steps.project_version.outputs.version_tag }}" \
+            "${{ steps.project_version.outputs.version_tag }}" \
+            "${GITHUB_SHA}"
+          git push origin "refs/tags/${{ steps.project_version.outputs.version_tag }}"
+
+      - name: Resolve deploy version
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          computed_version="${{ steps.project_version.outputs.version }}"
+          version="${computed_version}"
+          if ! [[ "${{ github.ref_name }}" == "develop" && "${{ steps.project_version.outputs.changed }}" == "true" ]]; then
+            git fetch --force --tags origin \
+              +refs/heads/develop:refs/remotes/origin/develop
+
+            tag="$(
+              git for-each-ref --format='%(refname:short) %(*objectname)' 'refs/tags/cc-agent-v*' |
+                while read -r candidate tagged_commit; do
+                  if [ -z "${tagged_commit}" ]; then
+                    tagged_commit="$(git rev-list -n 1 "${candidate}")"
+                  fi
+                  if git merge-base --is-ancestor "${tagged_commit}" HEAD &&
+                    git merge-base --is-ancestor "${tagged_commit}" refs/remotes/origin/develop; then
+                    printf '%s\n' "${candidate}"
+                  fi
+                done |
+                sort -V |
+                tail -n 1
+            )"
+            tagged_version="${tag#cc-agent-v}"
+            if [ -z "${tagged_version}" ]; then
+              echo "No released cc-agent tag from develop is contained in ${GITHUB_SHA}." >&2
+              echo "Merge a tagged develop commit into staging/prd before deploying." >&2
+              exit 1
+            fi
+            version="${tagged_version}"
+          fi
+          if [ -z "${version}" ]; then
+            version="$(python -c 'import pathlib, tomllib; data = tomllib.loads(pathlib.Path("services/python/creators-agent/pyproject.toml").read_text()); print(data["project"]["version"])')"
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "revision=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+
+  check-backend:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'develop' && needs.detect-changes.outputs.backend_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'dev')
+    needs:
+      - choose-runner
+      - detect-changes
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: services/python/creators-agent
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.9.16
+          enable-cache: true
+          prune-cache: false
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Sync workspace dependencies
+        run: uv sync --frozen
+
+      - name: Quality gate
+        run: uv run poe check-llm
+
+      - name: Agent Docker build smoke
+        working-directory: ${{ github.workspace }}
+        run: docker buildx build --output=type=cacheonly -f services/python/creators-agent/Dockerfile.backend .
+
+  check-gradio:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'develop' && needs.detect-changes.outputs.gradio_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'dev')
+    needs:
+      - choose-runner
+      - detect-changes
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: services/python/creators-agent
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.9.16
+          enable-cache: true
+          prune-cache: false
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Sync workspace dependencies
+        run: uv sync --frozen
+
+      - name: Quality gate
+        run: uv run poe check-llm
+
+      - name: Gradio Docker build smoke
+        working-directory: ${{ github.workspace }}
+        run: docker buildx build --output=type=cacheonly -f services/python/creators-agent/Dockerfile.frontend .
+
+  check-deepeval:
+    if: >-
+      needs.detect-changes.outputs.deepeval_changed == 'true' &&
+      (
+        (github.event_name == 'push' && github.ref_name == 'develop') ||
+        (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'dev')
+      )
+    needs:
+      - choose-runner
+      - detect-changes
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: services/python/creators-agent-deepeval
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.9.16
+          enable-cache: true
+          prune-cache: false
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Sync workspace dependencies
+        run: uv sync --frozen
+
+      - name: Quality gate
+        run: uv run poe check
+
+      - name: DeepEval Docker build smoke
+        working-directory: ${{ github.workspace }}
+        run: docker buildx build --output=type=cacheonly -f services/python/creators-agent-deepeval/Dockerfile.deepeval .
+
+  deploy-dev:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'develop' && needs.detect-changes.outputs.backend_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'dev')
+    needs:
+      - choose-runner
+      - detect-changes
+      - validate-ref
+      - check-backend
+      - version
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    environment: dev
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy dev app in Coolify
+        uses: ./.github/actions/deploy-coolify-app
+        with:
+          endpoint: ${{ vars.OT_COOLIFY_ENDPOINT }}
+          token: ${{ secrets.OT_COOLIFY_TOKEN }}
+          app-uuid: ${{ vars.OT_COOLIFY_CC_AGENT_DEV_UUID || vars.OT_COOLIFY_CREATORS_AGENT_DEV_UUID }}
+          force-rebuild: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+          dockerfile-location: /services/python/creators-agent/Dockerfile.backend
+          env-keys: |
+            CC_AGENT_VERSION
+            CC_AGENT_REVISION
+            JUDGE_MODE
+            JUDGE_MODEL
+            SERVICE_NAME
+            APP_ENV
+            DEFAULT_PROMPT
+            ALLOW_WIDGET_PROMPT_VERSION_OVERRIDE
+            OBSERVABILITY_ENABLED
+            SENTRY_ENVIRONMENT
+            SENTRY_RELEASE
+            AGENT_MCP_URL
+            AGENT_API_TOKEN
+            ADVISOR_HMAC_SECRET
+            SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+            WEAVIATE_URL
+            WEAVIATE_QUERY_TRANSPORT
+            WEAVIATE_REST_QUERY_ENABLED
+            WEAVIATE_GRPC_HOST
+            WEAVIATE_GRPC_PORT
+            WEAVIATE_GRPC_SECURE
+            VERTEX_PROJECT_ID
+            VERTEX_REGION
+            VERTEX_CREDENTIALS_BASE64
+            AGENT_SAFETY_LAYER_ENABLED
+            AGENT_SAFETY_LLM_IN_HOUSE_ENABLED
+            AGENT_SAFETY_MODEL_ARMOR_ENABLED
+            AGENT_SAFETY_MODEL_ARMOR_BLOCK_ACTIONS
+            AGENT_SAFETY_FAIL_CLOSED
+            MODEL_ARMOR_PROJECT_ID
+            MODEL_ARMOR_LOCATION
+            MODEL_ARMOR_TEMPLATE_ID
+            LOGFIRE_TOKEN
+            LOGFIRE_BASE_URL
+            LOGFIRE_PROJECT_URL
+            LOGFIRE_SERVICE_NAME
+            LOGFIRE_ENVIRONMENT
+            LOGFIRE_SEND_TO_LOGFIRE
+            LANGFUSE_TRACING_ENABLED
+            LANGFUSE_ALLOW_WITH_LOGFIRE
+            LANGFUSE_BASE_URL
+            LANGFUSE_PUBLIC_KEY
+            LANGFUSE_SECRET_KEY
+            LANGFUSE_SERVICE_NAME
+            LANGFUSE_TRACING_ENVIRONMENT
+            LANGFUSE_RELEASE
+            PORT
+        env:
+          CC_AGENT_VERSION: ${{ needs.version.outputs.version }}
+          CC_AGENT_REVISION: ${{ needs.version.outputs.revision }}
+          JUDGE_MODE: off
+          JUDGE_MODEL: gemini-2.5-flash-lite
+          SERVICE_NAME: cc-agent
+          APP_ENV: dev
+          DEFAULT_PROMPT: v6
+          ALLOW_WIDGET_PROMPT_VERSION_OVERRIDE: 'true'
+          OBSERVABILITY_ENABLED: 'true'
+          SENTRY_ENVIRONMENT: dev
+          SENTRY_RELEASE: cc-agent@${{ needs.version.outputs.version }}+${{ needs.version.outputs.revision }}
+          AGENT_MCP_URL: https://cc-agent-mcp-dev.app.wnz.sh/mcp
+          AGENT_API_TOKEN: ${{ secrets.OT_CC_AGENT_API_TOKEN || secrets.OT_CREATORS_AGENT_API_TOKEN }}
+          ADVISOR_HMAC_SECRET: ${{ secrets.OT_ADVISOR_HMAC_SECRET }}
+          SUPABASE_URL: ${{ vars.OT_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.OT_SUPABASE_SERVICE_ROLE_KEY }}
+          WEAVIATE_URL: https://cc-weaviate.creatorchat.live
+          WEAVIATE_QUERY_TRANSPORT: sdk
+          WEAVIATE_REST_QUERY_ENABLED: 'false'
+          WEAVIATE_GRPC_HOST: cc-weaviate-grpc.creatorchat.live
+          WEAVIATE_GRPC_PORT: '443'
+          WEAVIATE_GRPC_SECURE: 'true'
+          VERTEX_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          VERTEX_REGION: ${{ vars.OT_VERTEX_REGION }}
+          VERTEX_CREDENTIALS_BASE64: ${{ secrets.OT_VERTEX_CREDENTIALS_BASE64 }}
+          AGENT_SAFETY_LAYER_ENABLED: 'true'
+          AGENT_SAFETY_LLM_IN_HOUSE_ENABLED: 'false'
+          AGENT_SAFETY_MODEL_ARMOR_ENABLED: 'true'
+          AGENT_SAFETY_MODEL_ARMOR_BLOCK_ACTIONS: refuse,escalate
+          AGENT_SAFETY_FAIL_CLOSED: 'true'
+          MODEL_ARMOR_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          MODEL_ARMOR_LOCATION: us-central1
+          MODEL_ARMOR_TEMPLATE_ID: creatorchat-agent-safety-v1
+          LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}
+          LOGFIRE_BASE_URL: https://logfire-eu.pydantic.dev
+          LOGFIRE_PROJECT_URL: https://logfire-eu.pydantic.dev/busy-bots/creator-chat
+          LOGFIRE_SERVICE_NAME: cc-agent
+          LOGFIRE_ENVIRONMENT: dev
+          LOGFIRE_SEND_TO_LOGFIRE: 'true'
+          LANGFUSE_TRACING_ENABLED: 'true'
+          LANGFUSE_ALLOW_WITH_LOGFIRE: 'true'
+          LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_SERVICE_NAME: cc-agent
+          LANGFUSE_TRACING_ENVIRONMENT: dev
+          LANGFUSE_RELEASE: cc-agent@${{ needs.version.outputs.version }}+${{ needs.version.outputs.revision }}
+          PORT: '80'
+
+  deploy-deepeval-dev:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'develop' && needs.detect-changes.outputs.deepeval_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'dev')
+    needs:
+      - choose-runner
+      - detect-changes
+      - validate-ref
+      - check-deepeval
+      - version
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    environment: dev
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy dev DeepEval app in Coolify
+        uses: ./.github/actions/deploy-coolify-app
+        with:
+          endpoint: ${{ vars.OT_COOLIFY_ENDPOINT }}
+          token: ${{ secrets.OT_COOLIFY_TOKEN }}
+          app-uuid: ${{ vars.OT_COOLIFY_CC_AGENT_DEEPEVAL_DEV_UUID || vars.OT_COOLIFY_CREATORS_AGENT_DEEPEVAL_DEV_UUID }}
+          force-rebuild: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+          dockerfile-location: /services/python/creators-agent-deepeval/Dockerfile.deepeval
+          env-keys: |
+            CC_AGENT_VERSION
+            CC_AGENT_REVISION
+            AGENT_API_URL
+            AGENT_API_TOKEN
+            AGENT_PROMPT_VERSION
+            DEEPEVAL_API_TOKEN
+            DEEPEVAL_JUDGE_MODEL
+            VERTEX_PROJECT_ID
+            VERTEX_REGION
+            VERTEX_CREDENTIALS_BASE64
+        env:
+          CC_AGENT_VERSION: ${{ needs.version.outputs.version }}
+          CC_AGENT_REVISION: ${{ needs.version.outputs.revision }}
+          AGENT_API_URL: https://cc-agent-dev.app.wnz.sh/v1/chat/completions
+          AGENT_API_TOKEN: ${{ secrets.OT_CC_AGENT_API_TOKEN || secrets.OT_CREATORS_AGENT_API_TOKEN }}
+          AGENT_PROMPT_VERSION: v4
+          DEEPEVAL_API_TOKEN: ${{ secrets.OT_CC_AGENT_DEEPEVAL_API_TOKEN || secrets.OT_CREATORS_AGENT_DEEPEVAL_API_TOKEN }}
+          DEEPEVAL_JUDGE_MODEL: ${{ vars.OT_DEEPEVAL_JUDGE_MODEL || 'gemini-2.5-flash' }}
+          VERTEX_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          VERTEX_REGION: ${{ vars.OT_VERTEX_REGION || 'us-central1' }}
+          VERTEX_CREDENTIALS_BASE64: ${{ secrets.OT_VERTEX_CREDENTIALS_BASE64 }}
+
+  deploy-gradio-dev:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'develop' && needs.detect-changes.outputs.gradio_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'dev')
+    needs:
+      - choose-runner
+      - detect-changes
+      - validate-ref
+      - check-gradio
+      - version
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    environment: dev
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy dev Gradio app in Coolify
+        uses: ./.github/actions/deploy-coolify-app
+        with:
+          endpoint: ${{ vars.OT_COOLIFY_ENDPOINT }}
+          token: ${{ secrets.OT_COOLIFY_TOKEN }}
+          app-uuid: ${{ vars.OT_COOLIFY_CC_AGENT_GRADIO_UUID || vars.OT_COOLIFY_CREATORS_AGENT_GRADIO_UUID }}
+          force-rebuild: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+          dockerfile-location: /services/python/creators-agent/Dockerfile.frontend
+          connect-to-docker-network: 'true'
+          env-keys: |
+            CC_AGENT_VERSION
+            CC_AGENT_REVISION
+            DEFAULT_PROMPT
+            API_URL
+            AGENT_API_TOKEN
+            AGENT_MCP_URL
+            DEEPEVAL_API_URL
+            DEEPEVAL_API_TOKEN
+            SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+            WEAVIATE_URL
+            WEAVIATE_API_KEY
+            WEAVIATE_TENANT
+            WEAVIATE_GRPC_HOST
+            WEAVIATE_GRPC_PORT
+            WEAVIATE_GRPC_SECURE
+            MONGODB_URI
+            MONGODB_DATABASE
+            MONGODB_USERS_COLLECTION
+            MONGODB_PROMPTS_COLLECTION
+            MONGODB_PROMPT_COUNTERS_COLLECTION
+            VERTEX_PROJECT_ID
+            VERTEX_REGION
+            VERTEX_CREDENTIALS_BASE64
+            GRADIO_USERNAME
+            GRADIO_PASSWORD
+            GRADIO_SERVER_PORT
+            ANTHROPIC_CACHE_MESSAGES
+        env:
+          CC_AGENT_VERSION: ${{ needs.version.outputs.version }}
+          CC_AGENT_REVISION: ${{ needs.version.outputs.revision }}
+          DEFAULT_PROMPT: v6
+          API_URL: https://cc-agent-dev.app.wnz.sh/v1
+          AGENT_API_TOKEN: ${{ secrets.OT_CC_AGENT_API_TOKEN || secrets.OT_CREATORS_AGENT_API_TOKEN }}
+          AGENT_MCP_URL: https://cc-agent-mcp-dev.app.wnz.sh/mcp
+          DEEPEVAL_API_URL: https://cc-agent-deepeval-dev.app.wnz.sh
+          DEEPEVAL_API_TOKEN: ${{ secrets.OT_CC_AGENT_DEEPEVAL_API_TOKEN || secrets.OT_CREATORS_AGENT_DEEPEVAL_API_TOKEN }}
+          SUPABASE_URL: ${{ vars.OT_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.OT_SUPABASE_SERVICE_ROLE_KEY }}
+          WEAVIATE_URL: https://cc-weaviate-dev.app.wnz.sh
+          WEAVIATE_API_KEY: ${{ secrets.OT_WEAVIATE_API_KEY }}
+          WEAVIATE_TENANT: default
+          WEAVIATE_GRPC_HOST: cc-weaviate-grpc-dev.app.wnz.sh
+          WEAVIATE_GRPC_PORT: '443'
+          WEAVIATE_GRPC_SECURE: 'true'
+          MONGODB_URI: ${{ secrets.OT_CC_AGENT_GRADIO_MONGODB_URI || secrets.OT_CREATORS_AGENT_GRADIO_MONGODB_URI }}
+          MONGODB_DATABASE: creator_agent_gradio
+          MONGODB_USERS_COLLECTION: users
+          MONGODB_PROMPTS_COLLECTION: prompts
+          MONGODB_PROMPT_COUNTERS_COLLECTION: prompt_counters
+          VERTEX_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          VERTEX_REGION: ${{ vars.OT_VERTEX_REGION || 'us-central1' }}
+          VERTEX_CREDENTIALS_BASE64: ${{ secrets.OT_VERTEX_CREDENTIALS_BASE64 }}
+          GRADIO_USERNAME: ${{ vars.GRADIO_USERNAME || 'admin' }}
+          GRADIO_PASSWORD: ${{ secrets.GRADIO_PASSWORD }}
+          GRADIO_SERVER_PORT: '80'
+          ANTHROPIC_CACHE_MESSAGES: 'true'
+
+  notify-dev:
+    if: >-
+      always() &&
+      (
+        (github.event_name == 'push' && github.ref_name == 'develop') ||
+        (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'dev')
+      )
+    needs:
+      - choose-runner
+      - detect-changes
+      - version
+      - check-backend
+      - check-gradio
+      - check-deepeval
+      - deploy-dev
+      - deploy-deepeval-dev
+      - deploy-gradio-dev
+    uses: ./.github/workflows/_reusable-slack-notify.yml
+    with:
+      runs-on-json: ${{ needs.choose-runner.outputs.runs-on-json }}
+      environment: dev
+      component: CC Agent
+      action: deploy
+      status: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || (needs.deploy-dev.result == 'skipped' && needs.deploy-deepeval-dev.result == 'skipped' && needs.deploy-gradio-dev.result == 'skipped') && 'skipped' || 'success' }}
+      version: ${{ needs.version.outputs.version }}
+      revision: ${{ needs.version.outputs.revision }}
+      details: Coolify component deployments
+    secrets:
+      slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_OPS_DEV }}
+
+  deploy-deepeval-stg:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'staging' && needs.detect-changes.outputs.deepeval_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'stg')
+    needs:
+      - choose-runner
+      - detect-changes
+      - validate-ref
+      - version
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    environment: stg
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy staging DeepEval app in Coolify
+        uses: ./.github/actions/deploy-coolify-app
+        with:
+          endpoint: ${{ vars.OT_COOLIFY_ENDPOINT }}
+          token: ${{ secrets.OT_COOLIFY_TOKEN }}
+          app-uuid: ${{ vars.OT_COOLIFY_CC_AGENT_DEEPEVAL_STG_UUID || vars.OT_COOLIFY_CREATORS_AGENT_DEEPEVAL_STG_UUID }}
+          force-rebuild: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+          dockerfile-location: /services/python/creators-agent-deepeval/Dockerfile.deepeval
+          env-keys: |
+            CC_AGENT_VERSION
+            CC_AGENT_REVISION
+            AGENT_API_URL
+            AGENT_API_TOKEN
+            AGENT_PROMPT_VERSION
+            DEEPEVAL_API_TOKEN
+            DEEPEVAL_JUDGE_MODEL
+            VERTEX_PROJECT_ID
+            VERTEX_REGION
+            VERTEX_CREDENTIALS_BASE64
+        env:
+          CC_AGENT_VERSION: ${{ needs.version.outputs.version }}
+          CC_AGENT_REVISION: ${{ needs.version.outputs.revision }}
+          AGENT_API_URL: https://cc-agent-stg.app.wnz.sh/v1/chat/completions
+          AGENT_API_TOKEN: ${{ secrets.OT_CC_AGENT_API_TOKEN || secrets.OT_CREATORS_AGENT_API_TOKEN }}
+          AGENT_PROMPT_VERSION: v4
+          DEEPEVAL_API_TOKEN: ${{ secrets.OT_CC_AGENT_DEEPEVAL_API_TOKEN || secrets.OT_CREATORS_AGENT_DEEPEVAL_API_TOKEN }}
+          DEEPEVAL_JUDGE_MODEL: ${{ vars.OT_DEEPEVAL_JUDGE_MODEL || 'gemini-2.5-flash' }}
+          VERTEX_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          VERTEX_REGION: ${{ vars.OT_VERTEX_REGION || 'us-central1' }}
+          VERTEX_CREDENTIALS_BASE64: ${{ secrets.OT_VERTEX_CREDENTIALS_BASE64 }}
+
+  deploy-gradio-stg:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'staging' && needs.detect-changes.outputs.gradio_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'stg')
+    needs:
+      - choose-runner
+      - detect-changes
+      - validate-ref
+      - version
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    environment: stg
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy staging Gradio app in Coolify
+        uses: ./.github/actions/deploy-coolify-app
+        with:
+          endpoint: ${{ vars.OT_COOLIFY_ENDPOINT }}
+          token: ${{ secrets.OT_COOLIFY_TOKEN }}
+          app-uuid: ${{ vars.OT_COOLIFY_CC_AGENT_GRADIO_UUID || vars.OT_COOLIFY_CREATORS_AGENT_GRADIO_UUID }}
+          force-rebuild: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+          dockerfile-location: /services/python/creators-agent/Dockerfile.frontend
+          connect-to-docker-network: 'true'
+          env-keys: |
+            CC_AGENT_VERSION
+            CC_AGENT_REVISION
+            DEFAULT_PROMPT
+            API_URL
+            AGENT_API_TOKEN
+            AGENT_MCP_URL
+            DEEPEVAL_API_URL
+            DEEPEVAL_API_TOKEN
+            SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+            WEAVIATE_URL
+            WEAVIATE_API_KEY
+            WEAVIATE_TENANT
+            WEAVIATE_GRPC_HOST
+            WEAVIATE_GRPC_PORT
+            WEAVIATE_GRPC_SECURE
+            MONGODB_URI
+            MONGODB_DATABASE
+            MONGODB_USERS_COLLECTION
+            MONGODB_PROMPTS_COLLECTION
+            MONGODB_PROMPT_COUNTERS_COLLECTION
+            VERTEX_PROJECT_ID
+            VERTEX_REGION
+            VERTEX_CREDENTIALS_BASE64
+            GRADIO_USERNAME
+            GRADIO_PASSWORD
+            GRADIO_SERVER_PORT
+            ANTHROPIC_CACHE_MESSAGES
+        env:
+          CC_AGENT_VERSION: ${{ needs.version.outputs.version }}
+          CC_AGENT_REVISION: ${{ needs.version.outputs.revision }}
+          DEFAULT_PROMPT: v6
+          API_URL: https://cc-agent-stg.app.wnz.sh/v1
+          AGENT_API_TOKEN: ${{ secrets.OT_CC_AGENT_API_TOKEN || secrets.OT_CREATORS_AGENT_API_TOKEN }}
+          AGENT_MCP_URL: https://cc-agent-mcp-stg.app.wnz.sh/mcp
+          DEEPEVAL_API_URL: https://cc-agent-deepeval-stg.app.wnz.sh
+          DEEPEVAL_API_TOKEN: ${{ secrets.OT_CC_AGENT_DEEPEVAL_API_TOKEN || secrets.OT_CREATORS_AGENT_DEEPEVAL_API_TOKEN }}
+          SUPABASE_URL: ${{ vars.OT_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.OT_SUPABASE_SERVICE_ROLE_KEY }}
+          WEAVIATE_URL: https://cc-weaviate-stg.app.wnz.sh
+          WEAVIATE_API_KEY: ${{ secrets.OT_WEAVIATE_API_KEY }}
+          WEAVIATE_TENANT: default
+          WEAVIATE_GRPC_HOST: cc-weaviate-grpc-stg.app.wnz.sh
+          WEAVIATE_GRPC_PORT: '443'
+          WEAVIATE_GRPC_SECURE: 'true'
+          MONGODB_URI: ${{ secrets.OT_CC_AGENT_GRADIO_MONGODB_URI || secrets.OT_CREATORS_AGENT_GRADIO_MONGODB_URI }}
+          MONGODB_DATABASE: creator_agent_gradio
+          MONGODB_USERS_COLLECTION: users
+          MONGODB_PROMPTS_COLLECTION: prompts
+          MONGODB_PROMPT_COUNTERS_COLLECTION: prompt_counters
+          VERTEX_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          VERTEX_REGION: ${{ vars.OT_VERTEX_REGION || 'us-central1' }}
+          VERTEX_CREDENTIALS_BASE64: ${{ secrets.OT_VERTEX_CREDENTIALS_BASE64 }}
+          GRADIO_USERNAME: ${{ vars.GRADIO_USERNAME || 'admin' }}
+          GRADIO_PASSWORD: ${{ secrets.GRADIO_PASSWORD }}
+          GRADIO_SERVER_PORT: '80'
+          ANTHROPIC_CACHE_MESSAGES: 'true'
+
+  deploy-stg:
+    if: >-
+      (github.event_name == 'push' && github.ref_name == 'staging' && needs.detect-changes.outputs.backend_changed == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'stg')
+    needs:
+      - choose-runner
+      - detect-changes
+      - validate-ref
+      - version
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    environment: stg
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy staging app in Coolify
+        uses: ./.github/actions/deploy-coolify-app
+        with:
+          endpoint: ${{ vars.OT_COOLIFY_ENDPOINT }}
+          token: ${{ secrets.OT_COOLIFY_TOKEN }}
+          app-uuid: ${{ vars.OT_COOLIFY_CC_AGENT_STG_UUID || vars.OT_COOLIFY_CREATORS_AGENT_STG_UUID }}
+          force-rebuild: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+          dockerfile-location: /services/python/creators-agent/Dockerfile.backend
+          env-keys: |
+            CC_AGENT_VERSION
+            CC_AGENT_REVISION
+            JUDGE_MODE
+            JUDGE_MODEL
+            SERVICE_NAME
+            APP_ENV
+            DEFAULT_PROMPT
+            ALLOW_WIDGET_PROMPT_VERSION_OVERRIDE
+            OBSERVABILITY_ENABLED
+            SENTRY_DSN
+            SENTRY_ENVIRONMENT
+            SENTRY_RELEASE
+            AGENT_MCP_URL
+            AGENT_API_TOKEN
+            ADVISOR_HMAC_SECRET
+            SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+            VERTEX_PROJECT_ID
+            VERTEX_REGION
+            VERTEX_CREDENTIALS_BASE64
+            AGENT_SAFETY_LAYER_ENABLED
+            AGENT_SAFETY_LLM_IN_HOUSE_ENABLED
+            AGENT_SAFETY_MODEL_ARMOR_ENABLED
+            AGENT_SAFETY_MODEL_ARMOR_BLOCK_ACTIONS
+            AGENT_SAFETY_FAIL_CLOSED
+            MODEL_ARMOR_PROJECT_ID
+            MODEL_ARMOR_LOCATION
+            MODEL_ARMOR_TEMPLATE_ID
+            LOGFIRE_TOKEN
+            LOGFIRE_BASE_URL
+            LOGFIRE_PROJECT_URL
+            LOGFIRE_SERVICE_NAME
+            LOGFIRE_ENVIRONMENT
+            LOGFIRE_SEND_TO_LOGFIRE
+            LANGFUSE_TRACING_ENABLED
+            LANGFUSE_ALLOW_WITH_LOGFIRE
+            LANGFUSE_BASE_URL
+            LANGFUSE_PUBLIC_KEY
+            LANGFUSE_SECRET_KEY
+            LANGFUSE_SERVICE_NAME
+            LANGFUSE_TRACING_ENVIRONMENT
+            LANGFUSE_RELEASE
+            PORT
+        env:
+          CC_AGENT_VERSION: ${{ needs.version.outputs.version }}
+          CC_AGENT_REVISION: ${{ needs.version.outputs.revision }}
+          JUDGE_MODE: off
+          JUDGE_MODEL: gemini-2.5-flash-lite
+          SERVICE_NAME: cc-agent
+          APP_ENV: stg
+          DEFAULT_PROMPT: v6
+          ALLOW_WIDGET_PROMPT_VERSION_OVERRIDE: 'true'
+          OBSERVABILITY_ENABLED: 'true'
+          SENTRY_DSN: ${{ secrets.SENTRY_CC_AGENT_DSN || secrets.SENTRY_CC_CREATORS_AGENT_DSN }}
+          SENTRY_ENVIRONMENT: stg
+          SENTRY_RELEASE: cc-agent@${{ needs.version.outputs.version }}+${{ needs.version.outputs.revision }}
+          AGENT_MCP_URL: https://cc-agent-mcp-stg.app.wnz.sh/mcp
+          AGENT_API_TOKEN: ${{ secrets.OT_CC_AGENT_API_TOKEN || secrets.OT_CREATORS_AGENT_API_TOKEN }}
+          ADVISOR_HMAC_SECRET: ${{ secrets.OT_ADVISOR_HMAC_SECRET }}
+          SUPABASE_URL: ${{ vars.OT_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.OT_SUPABASE_SERVICE_ROLE_KEY }}
+          VERTEX_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          VERTEX_REGION: ${{ vars.OT_VERTEX_REGION }}
+          VERTEX_CREDENTIALS_BASE64: ${{ secrets.OT_VERTEX_CREDENTIALS_BASE64 }}
+          AGENT_SAFETY_LAYER_ENABLED: 'true'
+          AGENT_SAFETY_LLM_IN_HOUSE_ENABLED: 'false'
+          AGENT_SAFETY_MODEL_ARMOR_ENABLED: 'true'
+          AGENT_SAFETY_MODEL_ARMOR_BLOCK_ACTIONS: refuse,escalate
+          AGENT_SAFETY_FAIL_CLOSED: 'true'
+          MODEL_ARMOR_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          MODEL_ARMOR_LOCATION: us-central1
+          MODEL_ARMOR_TEMPLATE_ID: creatorchat-agent-safety-v1
+          LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}
+          LOGFIRE_BASE_URL: https://logfire-eu.pydantic.dev
+          LOGFIRE_PROJECT_URL: https://logfire-eu.pydantic.dev/busy-bots/creator-chat
+          LOGFIRE_SERVICE_NAME: cc-agent
+          LOGFIRE_ENVIRONMENT: stg
+          LOGFIRE_SEND_TO_LOGFIRE: 'true'
+          LANGFUSE_TRACING_ENABLED: 'true'
+          LANGFUSE_ALLOW_WITH_LOGFIRE: 'true'
+          LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_SERVICE_NAME: cc-agent
+          LANGFUSE_TRACING_ENVIRONMENT: stg
+          LANGFUSE_RELEASE: cc-agent@${{ needs.version.outputs.version }}+${{ needs.version.outputs.revision }}
+          PORT: '80'
+
+  notify-stg:
+    if: >-
+      always() &&
+      (
+        (github.event_name == 'push' && github.ref_name == 'staging') ||
+        (github.event_name == 'workflow_dispatch' && inputs.target_environment == 'stg')
+      )
+    needs:
+      - choose-runner
+      - detect-changes
+      - version
+      - deploy-stg
+      - deploy-deepeval-stg
+      - deploy-gradio-stg
+    uses: ./.github/workflows/_reusable-slack-notify.yml
+    with:
+      runs-on-json: ${{ needs.choose-runner.outputs.runs-on-json }}
+      environment: stg
+      component: CC Agent
+      action: deploy
+      status: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || (needs.deploy-stg.result == 'skipped' && needs.deploy-deepeval-stg.result == 'skipped' && needs.deploy-gradio-stg.result == 'skipped') && 'skipped' || 'success' }}
+      version: ${{ needs.version.outputs.version }}
+      revision: ${{ needs.version.outputs.revision }}
+      details: Coolify component deployments
+    secrets:
+      slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_OPS_STG }}
+
+  deploy-prd:
+    if: github.event_name == 'workflow_dispatch' && inputs.target_environment == 'prd'
+    needs:
+      - choose-runner
+      - detect-changes
+      - validate-ref
+      - version
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-json) }}
+    environment: prd
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Deploy production app in Coolify
+        uses: ./.github/actions/deploy-coolify-app
+        with:
+          endpoint: ${{ vars.OT_COOLIFY_ENDPOINT }}
+          token: ${{ secrets.OT_COOLIFY_TOKEN }}
+          app-uuid: ${{ vars.OT_COOLIFY_CC_AGENT_PRD_SRV01_UUID || 'xzyq8oxp4idr2xamoeikkmsh' }}
+          force-rebuild: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
+          dockerfile-location: /services/python/creators-agent/Dockerfile.backend
+          env-keys: |
+            CC_AGENT_VERSION
+            CC_AGENT_REVISION
+            JUDGE_MODE
+            JUDGE_MODEL
+            SERVICE_NAME
+            APP_ENV
+            DEFAULT_PROMPT
+            ALLOW_WIDGET_PROMPT_VERSION_OVERRIDE
+            OBSERVABILITY_ENABLED
+            SENTRY_DSN
+            SENTRY_ENVIRONMENT
+            SENTRY_RELEASE
+            AGENT_MCP_URL
+            AGENT_API_TOKEN
+            ADVISOR_HMAC_SECRET
+            SUPABASE_URL
+            SUPABASE_SERVICE_ROLE_KEY
+            VERTEX_PROJECT_ID
+            VERTEX_REGION
+            VERTEX_CREDENTIALS_BASE64
+            AGENT_SAFETY_LAYER_ENABLED
+            AGENT_SAFETY_LLM_IN_HOUSE_ENABLED
+            AGENT_SAFETY_MODEL_ARMOR_ENABLED
+            AGENT_SAFETY_MODEL_ARMOR_BLOCK_ACTIONS
+            AGENT_SAFETY_FAIL_CLOSED
+            MODEL_ARMOR_PROJECT_ID
+            MODEL_ARMOR_LOCATION
+            MODEL_ARMOR_TEMPLATE_ID
+            LOGFIRE_TOKEN
+            LOGFIRE_BASE_URL
+            LOGFIRE_PROJECT_URL
+            LOGFIRE_SERVICE_NAME
+            LOGFIRE_ENVIRONMENT
+            LOGFIRE_SEND_TO_LOGFIRE
+            LANGFUSE_TRACING_ENABLED
+            LANGFUSE_ALLOW_WITH_LOGFIRE
+            LANGFUSE_BASE_URL
+            LANGFUSE_PUBLIC_KEY
+            LANGFUSE_SECRET_KEY
+            LANGFUSE_SERVICE_NAME
+            LANGFUSE_TRACING_ENVIRONMENT
+            LANGFUSE_RELEASE
+            PORT
+        env:
+          CC_AGENT_VERSION: ${{ needs.version.outputs.version }}
+          CC_AGENT_REVISION: ${{ needs.version.outputs.revision }}
+          JUDGE_MODE: off
+          JUDGE_MODEL: gemini-2.5-flash-lite
+          SERVICE_NAME: cc-agent
+          APP_ENV: prd
+          DEFAULT_PROMPT: v6
+          ALLOW_WIDGET_PROMPT_VERSION_OVERRIDE: 'true'
+          OBSERVABILITY_ENABLED: 'true'
+          SENTRY_DSN: ${{ secrets.SENTRY_CC_AGENT_DSN || secrets.SENTRY_CC_CREATORS_AGENT_DSN }}
+          SENTRY_ENVIRONMENT: prd
+          SENTRY_RELEASE: cc-agent@${{ needs.version.outputs.version }}+${{ needs.version.outputs.revision }}
+          AGENT_MCP_URL: https://cc-agent-mcp.creatorchat.live/mcp
+          AGENT_API_TOKEN: ${{ secrets.OT_CC_AGENT_API_TOKEN || secrets.OT_CREATORS_AGENT_API_TOKEN }}
+          ADVISOR_HMAC_SECRET: ${{ secrets.OT_ADVISOR_HMAC_SECRET }}
+          SUPABASE_URL: ${{ vars.OT_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.OT_SUPABASE_SERVICE_ROLE_KEY }}
+          VERTEX_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          VERTEX_REGION: ${{ vars.OT_VERTEX_REGION }}
+          VERTEX_CREDENTIALS_BASE64: ${{ secrets.OT_VERTEX_CREDENTIALS_BASE64 }}
+          AGENT_SAFETY_LAYER_ENABLED: 'true'
+          AGENT_SAFETY_LLM_IN_HOUSE_ENABLED: 'false'
+          AGENT_SAFETY_MODEL_ARMOR_ENABLED: 'true'
+          AGENT_SAFETY_MODEL_ARMOR_BLOCK_ACTIONS: refuse,escalate
+          AGENT_SAFETY_FAIL_CLOSED: 'true'
+          MODEL_ARMOR_PROJECT_ID: ${{ vars.OT_VERTEX_PROJECT_ID }}
+          MODEL_ARMOR_LOCATION: us-central1
+          MODEL_ARMOR_TEMPLATE_ID: creatorchat-agent-safety-v1
+          LOGFIRE_TOKEN: ${{ secrets.LOGFIRE_TOKEN }}
+          LOGFIRE_BASE_URL: https://logfire-eu.pydantic.dev
+          LOGFIRE_PROJECT_URL: https://logfire-eu.pydantic.dev/busy-bots/creator-chat
+          LOGFIRE_SERVICE_NAME: cc-agent
+          LOGFIRE_ENVIRONMENT: prd
+          LOGFIRE_SEND_TO_LOGFIRE: 'true'
+          LANGFUSE_TRACING_ENABLED: 'true'
+          LANGFUSE_ALLOW_WITH_LOGFIRE: 'true'
+          LANGFUSE_BASE_URL: ${{ vars.LANGFUSE_BASE_URL }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_SERVICE_NAME: cc-agent
+          LANGFUSE_TRACING_ENVIRONMENT: prd
+          LANGFUSE_RELEASE: cc-agent@${{ needs.version.outputs.version }}+${{ needs.version.outputs.revision }}
+          PORT: '80'
+
+  notify-prd:
+    if: >-
+      always() &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.target_environment == 'prd'
+    needs:
+      - choose-runner
+      - detect-changes
+      - version
+      - deploy-prd
+    uses: ./.github/workflows/_reusable-slack-notify.yml
+    with:
+      runs-on-json: ${{ needs.choose-runner.outputs.runs-on-json }}
+      environment: prd
+      component: CC Agent
+      action: deploy
+      status: ${{ contains(needs.*.result, 'failure') && 'failure' || contains(needs.*.result, 'cancelled') && 'cancelled' || needs.deploy-prd.result == 'skipped' && 'skipped' || 'success' }}
+      version: ${{ needs.version.outputs.version }}
+      revision: ${{ needs.version.outputs.revision }}
+      details: Coolify backend deployment
+    secrets:
+      slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_OPS_PRD }}

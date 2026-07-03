@@ -81,10 +81,6 @@ function normalizeWords(value) {
     .match(/[a-z][a-z0-9]+/gu) ?? [];
 }
 
-function getNodeTextWords(sourceCode, node) {
-  return normalizeWords(sourceCode.getText(node));
-}
-
 function getIdentifierName(node) {
   if (!node) {
     return undefined;

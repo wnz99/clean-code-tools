@@ -28,6 +28,11 @@ candidate contains:
 - `semantic_questions`
 - suggested `mcp_queries`
 
+Rule-to-query mappings come from the shared
+[clean-code review trigger catalog](../skills/clean-code-mcp-reviewer/catalog/clean_code_review_triggers.json).
+The candidate scanner and the agent-feedback hook both read that catalog so the
+same deterministic triggers lead to the same semantic review questions.
+
 ## Run
 
 From lint JSON files:
@@ -56,6 +61,11 @@ bun run clean-code:candidates -- \
   --format markdown
 ```
 
+The `clean-code-mcp-reviewer` installer can also add an advisory pre-push hook.
+The hook runs the same candidate generation before Git pushes and prints
+semantic review prompts for the agent without blocking the push unless a project
+chooses a stricter mode.
+
 ## Trigger Policy
 
 Only rules with a strong relationship to maintainability are promoted into
@@ -82,7 +92,8 @@ this file for mixed responsibilities"; it does not mean "split the file."
 
 `skill` is always `clean-code-mcp-reviewer`. The candidate does not name
 language-specific skills because consuming systems may only install this repo's
-MCP reviewer skill.
+MCP reviewer skill. Agents should use `clean-code-mcp-reviewer` when it is
+available; if it is not installed, they should follow the same contract manually.
 
 Agents should:
 

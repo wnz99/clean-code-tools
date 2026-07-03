@@ -8,7 +8,7 @@ This repo publishes two native package shapes from the same source tree.
 - PyPI: `clean-code-tools-python`
 
 These are production registry names. If either name is already taken, rename the
-package in `package.json` or `pyproject.toml` before the first publish.
+package in `package.json` or `pyproject.toml` before publishing a fork.
 
 ## TypeScript / ESLint
 
@@ -26,24 +26,26 @@ npm publish --dry-run
 ```
 
 The package must not set `private: true`; otherwise npm refuses publication. The
-GitHub Actions workflows use npm trusted publishing with provenance, so configure
-the npm package's trusted publisher to allow this repository and these workflow
-files:
+GitHub Actions workflow uses npm trusted publishing, so configure the npm
+package's trusted publisher to allow this repository and this workflow file:
 
 - `.github/workflows/publish-main.yml`
 
-The workflows use Node 24 so the bundled npm supports trusted publishing.
-npm provenance can be re-enabled with `--provenance` if this repository is
-public; npm rejects provenance for private GitHub repositories.
+The workflow uses Node 24 so the bundled npm supports trusted publishing.
 
 ## Python / Pylint
 
 The PyPI package is `clean-code-tools-python`. It installs:
 
 - the `clean_code_tools_pylint` plugin package
-- Ruff and Pylint runtime dependencies
+- Ruff, Pylint, and plugin runtime dependencies
 - the reusable config as package data at
   `clean_code_tools_pylint/configs/python.clean-code.pyproject.toml`
+
+The packaged config also contains a Deptry section. Install `deptry` separately
+when applying the config manually, or use the
+`clean-code-mcp-reviewer` installer, which installs it as a development
+dependency.
 
 Before publishing:
 

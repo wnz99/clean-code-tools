@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "clean-code-tools-python"
-version = "1.0.5"
+version = "1.0.7"
 description = "Python clean-code lint plugin and recommended Ruff/Pylint config."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,6 +17,8 @@ keywords = [
   "static-analysis",
 ]
 dependencies = [
+  "astroid>=4.0.4",
+  "pydantic>=2.12.0",
   "pylint>=4.0.0",
   "ruff>=0.15.0",
 ]
@@ -29,8 +31,10 @@ Documentation = "https://github.com/wnz99/clean-code-tools/tree/main/docs"
 
 [dependency-groups]
 lint = [
+  "coverage[toml]>=7.13.0",
   "ruff>=0.15.0",
   "pylint>=4.0.0",
+  "deptry>=0.25.1",
 ]
 mcp = [
   "fastembed>=0.8.0",
@@ -199,6 +203,9 @@ split-on-trailing-comma = true
 "scripts/clean_code_python_triggers.py" = [
   "INP001",
 ]
+"scripts/clean_code_trigger_catalog.py" = [
+  "INP001",
+]
 "scripts/clean_code_review_io.py" = [
   "INP001",
 ]
@@ -211,6 +218,25 @@ split-on-trailing-comma = true
 "scripts/_mcp_app.py" = [
   "TRY003",
 ]
+"skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py" = [
+  "S603",
+  "T201",
+  "TRY003",
+]
+"skills/clean-code-mcp-reviewer/hooks/clean_code_agent_feedback.py" = [
+  "S603",
+  "S607",
+  "T201",
+]
+"skills/clean-code-mcp-reviewer/runtime/scripts/docker_init_weaviate.py" = [
+  "S603",
+  "T201",
+  "TRY003",
+]
+"skills/clean-code-mcp-reviewer/runtime/scripts/docker_mcp_server.py" = [
+  "S104",
+  "S603",
+]
 "scripts/weaviate_ingest_clean_code.py" = [
   "TRY003",
 ]
@@ -222,6 +248,9 @@ split-on-trailing-comma = true
   "PLR0913",
   "TRY003",
 ]
+"skills/clean-code-mcp-reviewer/runtime/src/python/mcp_server/server.py" = [
+  "PLR0913",
+]
 "src/python/mcp_server/semantic.py" = [
   "PLC0415",
   "TRY003",
@@ -231,6 +260,28 @@ split-on-trailing-comma = true
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
+
+[tool.deptry]
+known_first_party = [
+  "_mcp_app",
+  "clean_code_eslint_triggers",
+  "clean_code_python_triggers",
+  "clean_code_review_candidates",
+  "clean_code_review_io",
+  "clean_code_review_models",
+  "clean_code_trigger_catalog",
+  "mcp_server",
+]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = [
+  "ruff",
+]
+DEP004 = [
+  "fastembed",
+  "fastmcp",
+  "httpx",
+]
 
 [tool.pylint.main]
 py-version = "3.12"
@@ -299,6 +350,16 @@ allow-any-import-level = []
 
 [tool.pylint.reports]
 score = false
+
+[tool.coverage.run]
+branch = true
+source = [
+  "src/python/mcp_server",
+]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
 
 [tool.pyright]
 include = ["src/python/clean_code_tools_pylint", "src/python/mcp_server", "scripts"]

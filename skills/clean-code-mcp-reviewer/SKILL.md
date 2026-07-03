@@ -21,6 +21,195 @@ This skill is self-contained. Do not assume separate language-specific
 clean-code skills are installed. Use the language heuristics below when judging
 Python, JavaScript, TypeScript, or React code.
 
+## Installing Clean-Code Linting
+
+When the user asks to install, configure, adopt, bootstrap, or integrate the
+clean-code lint rules in another repository, use the bundled installer first.
+It makes the static lint layer deterministic and leaves the MCP review layer for
+semantic follow-up on the findings.
+
+Run from the target repository:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py
+```
+
+The default mode is a dry run. It detects JavaScript/TypeScript and Python,
+identifies the package manager or installer, inspects existing ESLint,
+Ruff, and Pylint configuration, and prints:
+
+- languages detected
+- packages that would be installed
+- files that would be created or modified
+- blockers that require a manual integration strategy
+- warnings such as missing lint scripts
+- recommended verification commands to run after applying
+
+Apply only when the plan says `status: safe to apply` and the user has asked to
+proceed:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --apply
+```
+
+`--apply` is still interactive by default. The installer asks before every
+host-side action it offers: modifying lint config files, installing packages,
+copying the Docker MCP runtime, starting Docker services, or installing Git
+hooks. For non-interactive automation, pass `--yes` only after the user has
+already approved the whole plan and each selected setup category is intentional.
+Before applying, it creates a Git rollback point by default: a
+`backup/clean-code-install-<timestamp>` branch, plus patch files under
+`.git/clean-code-installer-backups/` when applying over a dirty worktree. Use
+`--no-backup` only when the user explicitly declines that safety net.
+
+Use `--repo /path/to/repo` when the current directory is not the target repo.
+Use `--target path/to/package` for monorepos when the clean-code config belongs
+to a nested package or app inside `--repo`.
+Use `--skip-install` only for dry integration tests or when the user wants file
+changes but will install dependencies separately. Use `--allow-dirty` only when
+the user explicitly accepts applying changes over an uncommitted worktree.
+
+Installer behavior:
+
+- For JavaScript/TypeScript, install `clean-code-tools` plus its ESLint peer
+  dependencies, `knip`, and `fallow` as dev dependencies using the detected
+  package manager (`bun`, `pnpm`, `yarn`, or `npm`).
+- In a monorepo, prefer `--target` for package-local config. The installer can
+  detect package managers from ancestor workspace roots, warns when the root
+  workspace may not be the intended target, and uses the package manager's root
+  as the install command working directory when needed.
+- For a repo with no ESLint config, create `eslint.config.mjs` that exports the
+  recommended clean-code preset.
+- For a simple flat ESLint `export default [...]` config, import the preset and
+  spread it at the start of the exported array.
+- Create `knip.json` and `.fallowrc.json` when they do not already exist.
+- Add `check:knip`, `check:fallow`, and non-blocking
+  `inspect:fallow-health` package scripts when those names are free.
+- For complex ESLint config shapes, CommonJS configs, or framework-specific
+  configs that are not safe to rewrite mechanically, stop and explain the
+  manual integration: import
+  `clean-code-tools/configs/eslint.clean-code.recommended.mjs` and spread
+  `...cleanCode` before local overrides.
+- For Python, install `clean-code-tools-python` and `deptry` as development dependencies
+  using the detected installer (`uv`, `poetry`, or `pip` fallback).
+- For a repo with no `pyproject.toml`, create one with the clean-code Ruff and
+  Pylint sections plus a conservative `deptry` section.
+- For a `pyproject.toml` with no existing Ruff or Pylint sections, append the
+  clean-code lint sections.
+- For a `pyproject.toml` with existing clean-code lint sections but no
+  `[tool.deptry]`, append the conservative `deptry` section.
+- For existing Ruff or Pylint configuration, stop and recommend a manual merge
+  instead of overwriting local lint policy.
+
+After applying, run the recommended verification commands printed by the
+installer, then run any broader repo CI checks the project expects. If the new
+static rules produce maintainability candidates, use the MCP workflow below to
+decide which findings deserve refactors.
+
+`check:knip`, `check:fallow`, and `deptry` are deterministic tripwires:
+
+- Knip catches unused JS/TS files, exports, binaries, and dependency drift.
+- Fallow's default installed check runs dead-code and duplication analysis.
+- `inspect:fallow-health` intentionally does not fail the command; use its
+  complexity and hotspot output as MCP review input.
+- Deptry catches missing, unused, transitive, and misplaced Python dependencies.
+
+### Optional Git Hook Feedback
+
+The installer can also set up local Git hooks that run deterministic lint
+checks before push and print clean-code MCP review candidates back
+to the agent. This is useful when the user wants a static check to trigger a
+semantic follow-up review automatically.
+
+Interactive apply mode asks whether hooks should be installed. Recommend
+`pre-push` first because the lint feedback can take long enough to be disruptive
+before every commit. To plan the recommended hook explicitly:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --git-hooks pre-push
+```
+
+To apply after approval:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --apply --git-hooks pre-push
+```
+
+Hook choices are `none`, `pre-commit`, `pre-push`, or `both`. The default hook
+mode is `advisory`, which prints feedback without blocking Git. Use
+`--git-hook-mode blocking` only when the user wants candidate findings to fail
+the hook until reviewed. A local run can bypass hooks intentionally with:
+
+```bash
+CLEAN_CODE_AGENT_HOOK=0 git commit
+```
+
+or force advisory behavior for one command with:
+
+```bash
+CLEAN_CODE_AGENT_HOOK_MODE=advisory git push
+```
+
+The hook runs ESLint and Ruff by default. Pylint is intentionally skipped by
+default to keep pushes responsive; enable deeper Python hook feedback with
+`CLEAN_CODE_AGENT_HOOK_PYLINT=1 git push`.
+
+Hook output is a tripwire, not a final review result. When a hook prints
+candidate locations and suggested MCP queries, read the named files first, use
+this skill, query the MCP narrowly, and decide whether each candidate is a real
+maintainability issue in context.
+
+## Installing The Local MCP Runtime
+
+When the user wants the clean-code MCP to run on a host system without installing
+Python dependencies directly, use the bundled Docker runtime. It includes:
+
+- `Dockerfile`: builds the clean-code MCP image
+- `compose.yaml`: runs Weaviate plus the MCP HTTP server
+- `runtime/`: bundled MCP server source, ingest script, and clean-code corpus
+
+Plan the runtime install from the target repo or host folder:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --mcp-runtime
+```
+
+Apply after the user accepts the plan:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --mcp-runtime --apply
+```
+
+This creates `.clean-code-mcp/` in the target folder. To build and start
+Weaviate plus the MCP server in one step, use:
+
+```bash
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --start-mcp-runtime --apply
+```
+
+The stack exposes:
+
+- Weaviate HTTP: `http://127.0.0.1:8080`
+- Weaviate gRPC: `127.0.0.1:50051`
+- Clean-code MCP HTTP: `http://127.0.0.1:8765`
+
+The Compose stack has an explicit initialization service. `docker compose up
+--build` builds the MCP image, starts Weaviate, runs `clean-code-mcp-init` to
+ingest the bundled corpus into the Weaviate volume, and starts the FastMCP HTTP
+server only after initialization succeeds. Use `CLEAN_CODE_MCP_RESET_WEAVIATE=false`
+if preserving the existing Weaviate collection matters. Use
+`WEAVIATE_HTTP_PORT`, `WEAVIATE_GRPC_PORT`, and `CLEAN_CODE_MCP_PORT` when
+default ports are occupied.
+
+Manual commands after copy-only install:
+
+```bash
+docker compose -f .clean-code-mcp/compose.yaml up --build -d
+docker compose -f .clean-code-mcp/compose.yaml logs clean-code-mcp-init
+docker compose -f .clean-code-mcp/compose.yaml logs -f clean-code-mcp
+docker compose -f .clean-code-mcp/compose.yaml down
+```
+
 ## Refactor Discipline
 
 - Read formatter, linter, type-checker, framework, tests, and nearby files

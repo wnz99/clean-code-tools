@@ -10,7 +10,7 @@ release operations.
 - [ESLint custom rules](./eslint-custom-rules.md): project-owned TypeScript
   clean-code rules included in the ESLint plugin.
 - [Python recommended config](./python-lint-recommended-config.md): install and
-  use the Ruff/Pylint config from the Python package.
+  use the Ruff, Pylint, and Deptry config from the Python package.
 - [Python custom Pylint rules](./python-pylint-custom-rules.md): project-owned
   Python clean-code rules exposed by the Pylint plugin.
 

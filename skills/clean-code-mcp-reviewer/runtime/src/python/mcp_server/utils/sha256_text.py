@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import hashlib
+
+
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()

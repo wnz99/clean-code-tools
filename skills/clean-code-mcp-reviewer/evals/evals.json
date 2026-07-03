@@ -25,6 +25,21 @@
       "id": 5,
       "prompt": "Review this generated API client fixture change and decide whether clean-code patterns should block it.\n\n```ts\n// generated from billing-openapi.yaml\nexport const fixture = {\n  account: { owner: { address: { city: \"London\" } } },\n  status: \"active\"\n};\n\nexport const city = fixture.account.owner.address.city;\n```\n\nThe file path is `src/generated/billingClient.fixture.ts`.",
       "expected_output": "The agent recognizes generated/fixture code as a weak-match context and reports no strong clean-code finding unless local project rules say otherwise."
+    },
+    {
+      "id": 6,
+      "prompt": "Install the clean-code lint rules in this existing repo. It has package.json, eslint.config.mjs, pyproject.toml, and both TypeScript and Python source files. Explain what will be changed before applying anything, and stop if an existing lint config is too complex to rewrite safely.",
+      "expected_output": "The agent uses the bundled install_clean_code_linting.py dry-run first, reports detected languages, install commands, planned config edits, and blockers, then applies only safe changes after explicit approval."
+    },
+    {
+      "id": 7,
+      "prompt": "Set up the clean-code MCP locally for this repo, but do not install Python dependencies directly on the host. Use Docker if the skill provides a runtime.",
+      "expected_output": "The agent plans the bundled Docker MCP runtime install, explains that it will create .clean-code-mcp with Dockerfile, compose.yaml, runtime source, and corpus, then uses --mcp-runtime or --start-mcp-runtime only after approval."
+    },
+    {
+      "id": 8,
+      "prompt": "Install the clean-code lint rules and also add automated feedback when an agent commits or pushes. I want the setup to ask me before it changes or installs anything.",
+      "expected_output": "The agent runs the installer dry-run first, explains the planned lint config, package installs, Knip/Fallow/Deptry setup, and optional Git hooks, then uses interactive --apply without assuming consent. It describes --git-hooks choices, advisory versus blocking mode, and treats hook output as MCP review candidates rather than final findings."
     }
   ]
 }
