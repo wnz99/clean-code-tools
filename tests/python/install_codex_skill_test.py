@@ -31,7 +31,10 @@ class InstallCodexSkillTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             codex_home = Path(tmp) / "codex"
             with mock.patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}):
-                self.assertEqual(installer.default_dest_root(), codex_home / "skills")
+                self.assertEqual(installer.default_dest_root("codex"), codex_home / "skills")
+
+    def test_default_dest_root_supports_claude(self) -> None:
+        self.assertEqual(installer.default_dest_root("claude"), Path.home() / ".claude" / "skills")
 
     def test_install_copies_skill_and_ignores_bytecode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -146,6 +149,8 @@ class InstallCodexSkillTest(unittest.TestCase):
                     "argv",
                     [
                         "install_codex_skill.py",
+                        "--agent",
+                        "codex",
                         "--source",
                         str(source),
                         "--dest",

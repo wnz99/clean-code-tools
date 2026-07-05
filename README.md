@@ -48,34 +48,67 @@ Start with [docs/README.md](docs/README.md) for the full documentation index.
 - Serves a local FastMCP HTTP or stdio server for clean-code pattern lookup over
   the corpus in `data/clean-code-patterns.jsonl`.
 
-## Install The Codex Skill
+## Installation Workflow
 
-Clone this repo, then install the Codex skill into the active Codex home:
+There are two separate install steps:
+
+1. Install the agent skill so Codex or Claude Code knows how to operate this
+   tool safely.
+2. Use the installed skill to inspect a target repo, propose clean-code package
+   and config changes, and apply only the approved plan.
+
+### 1. Install The Agent Skill
+
+Clone this repo, then install the skill into the active agent's skills
+directory.
+
+For Codex:
 
 ```bash
-python3 /path/to/clean-code-tools/scripts/install_codex_skill.py
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex
 ```
 
-The script installs `skills/clean-code-mcp-reviewer` into
-`${CODEX_HOME:-~/.codex}/skills`. Restart Codex after installation so the skill
-is discovered.
+This installs `skills/clean-code-mcp-reviewer` into
+`${CODEX_HOME:-~/.codex}/skills`.
 
-If the skill is already installed and you want to update it from a newer clone:
+For Claude Code:
 
 ```bash
-python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --replace
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent claude
 ```
 
-Then ask Codex:
+This installs the same skill into `~/.claude/skills`.
+
+If the skill is already installed and you want to update it from a newer clone,
+add `--replace`:
+
+```bash
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex --replace
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent claude --replace
+```
+
+Restart the agent after installation so the skill is discovered.
+
+Then ask the agent from inside the target repo:
 
 ```text
 Use $clean-code-mcp-reviewer to inspect this repo and plan installation.
 ```
 
-## Configure Another Repo
+The expected result is a `Clean-Code Installation Plan`, not immediate file
+changes. The plan should name the recommended root or target-package strategy,
+the exact apply commands to run after approval, files/packages expected to
+change, manual merge steps, deferred items, rollback, verification commands, and
+any blocking questions.
 
-After the skill is installed, run its repo configurator from the repository you
-want to configure:
+In Claude Code, invoke the installed skill by name using the skill invocation
+style supported by your Claude Code version, or ask Claude to use the
+`clean-code-mcp-reviewer` skill explicitly.
+
+### 2. Install The Clean-Code Tooling
+
+The installed skill's first action should be a dry-run scan. The underlying
+command is:
 
 ```bash
 python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py
@@ -97,7 +130,8 @@ python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install
 Use `--allow-root-monorepo` only after explicitly deciding that root-level
 configuration is wanted.
 
-Apply after reviewing the plan:
+After reviewing the plan, ask the agent to apply the approved changes. The
+underlying apply command is:
 
 ```bash
 python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --apply
@@ -107,6 +141,12 @@ python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install
 installing packages, copying the Docker MCP runtime, starting Docker services,
 or installing Git hooks. For automation, use `--yes` only after the plan is
 already approved.
+
+For a monorepo target, apply the same `--target` that was used during planning:
+
+```bash
+python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --target apps/example-app --apply
+```
 
 Recommended hook setup:
 
