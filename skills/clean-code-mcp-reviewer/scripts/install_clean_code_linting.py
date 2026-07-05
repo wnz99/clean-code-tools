@@ -229,6 +229,31 @@ def has_js_workspaces(repo: Path) -> bool:
     return "workspaces" in payload
 
 
+def has_nested_project_files(repo: Path) -> bool:
+    project_files = (
+        "package.json",
+        "pyproject.toml",
+        "eslint.config.js",
+        "eslint.config.mjs",
+        "ruff.toml",
+    )
+    for name in project_files:
+        matches = [path for path in repo.glob(f"**/{name}") if "node_modules" not in path.parts]
+        if len(matches) > 1:
+            return True
+    return False
+
+
+def root_monorepo_reason(repo: Path) -> str | None:
+    if repo != git_root_for(repo):
+        return None
+    if has_js_workspaces(repo):
+        return "root JavaScript workspace"
+    if has_nested_project_files(repo):
+        return "multiple nested project/config files"
+    return None
+
+
 def js_package_manager_root(repo: Path) -> Path | None:
     lock_root = package_manager_root(
         repo,
@@ -505,10 +530,23 @@ def add_verification_plan(plan: Plan) -> None:
         plan.warnings.append("No obvious lint/test verification command was detected; run the repo's CI checks manually.")
 
 
-def build_plan(repo: Path, *, allow_dirty: bool, require_languages: bool = True) -> Plan:
+def build_plan(
+    repo: Path,
+    *,
+    allow_dirty: bool,
+    require_languages: bool = True,
+    allow_root_monorepo: bool = False,
+) -> Plan:
     plan = Plan(repo=repo, git_root=git_root_for(repo))
     if is_git_dirty(repo) and not allow_dirty:
         plan.blockers.append("Git worktree is dirty. Commit/stash first or rerun with --allow-dirty.")
+    monorepo_reason = root_monorepo_reason(repo)
+    if monorepo_reason and not allow_root_monorepo:
+        plan.blockers.append(
+            f"Root monorepo detected ({monorepo_reason}). Do not apply root-level clean-code "
+            "configuration automatically. Rerun with --target <package-or-service> for a package-local "
+            "plan, or pass --allow-root-monorepo only after the user explicitly approves root-level changes."
+        )
     plan_js(repo, plan)
     plan_python(repo, plan)
     if require_languages and not plan.languages:
@@ -810,6 +848,11 @@ def parser() -> argparse.ArgumentParser:
         help="Apply all planned host changes without interactive confirmation. Use only in automation.",
     )
     parser.add_argument("--allow-dirty", action="store_true", help="Allow applying with a dirty git worktree.")
+    parser.add_argument(
+        "--allow-root-monorepo",
+        action="store_true",
+        help="Allow root-level config changes in a detected monorepo after explicit user approval.",
+    )
     parser.add_argument("--no-backup", action="store_true", help="Do not create a Git rollback point before --apply.")
     parser.add_argument("--skip-install", action="store_true", help="Modify files without running package installers.")
     parser.add_argument(
@@ -926,7 +969,12 @@ def main() -> None:
         raise SystemExit(f"Repo does not exist: {repo}")
     target_repo = resolve_target_repo(repo, args.target)
     wants_mcp_runtime = args.mcp_runtime or args.start_mcp_runtime
-    plan = build_plan(target_repo, allow_dirty=args.allow_dirty, require_languages=not wants_mcp_runtime)
+    plan = build_plan(
+        target_repo,
+        allow_dirty=args.allow_dirty,
+        require_languages=not wants_mcp_runtime,
+        allow_root_monorepo=args.allow_root_monorepo,
+    )
     if wants_mcp_runtime:
         plan_mcp_runtime(target_repo, plan, start=args.start_mcp_runtime)
     hook_choice = resolve_hook_choice(args.git_hooks) if args.apply else args.git_hooks
