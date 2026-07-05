@@ -27,10 +27,10 @@ The repo produces two package shapes:
   Ruff/Pylint config fragment. The shared Python config also includes Deptry,
   which consuming projects install as a development dependency.
 
-It also includes the `clean-code-mcp-reviewer` Codex skill. The skill installer
-can detect a target repo's languages, propose lint/dependency-check setup,
-install packages, configure rules, and optionally add a local pre-push feedback
-hook.
+It also includes the `clean-code-mcp-reviewer` Codex skill. Install the skill
+first so Codex knows the workflow, then use its repo installer to detect a
+target repo's languages, propose lint/dependency-check setup, install packages,
+configure rules, and optionally add a local pre-push feedback hook.
 
 Start with [docs/README.md](docs/README.md) for the full documentation index.
 
@@ -48,10 +48,34 @@ Start with [docs/README.md](docs/README.md) for the full documentation index.
 - Serves a local FastMCP HTTP or stdio server for clean-code pattern lookup over
   the corpus in `data/clean-code-patterns.jsonl`.
 
-## Try It In Another Repo
+## Install The Codex Skill
 
-Clone this repo, then run the skill installer from the repository you want to
-configure:
+Clone this repo, then install the Codex skill into the active Codex home:
+
+```bash
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py
+```
+
+The script installs `skills/clean-code-mcp-reviewer` into
+`${CODEX_HOME:-~/.codex}/skills`. Restart Codex after installation so the skill
+is discovered.
+
+If the skill is already installed and you want to update it from a newer clone:
+
+```bash
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --replace
+```
+
+Then ask Codex:
+
+```text
+Use $clean-code-mcp-reviewer to inspect this repo and plan installation.
+```
+
+## Configure Another Repo
+
+After the skill is installed, run its repo configurator from the repository you
+want to configure:
 
 ```bash
 python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py
@@ -60,6 +84,18 @@ python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install
 The default mode is a dry run. It reports detected languages, package managers,
 files it would modify, commands it would run, and blockers that need manual
 integration.
+
+In monorepos, treat the dry run as a scan-first planning step. The installer
+blocks root-level workspace changes by default because creating root
+`eslint.config.mjs`, `knip.json`, `.fallowrc.json`, or Python lint sections can
+conflict with package-local policy. Prefer a package or service target:
+
+```bash
+python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --target apps/example-app
+```
+
+Use `--allow-root-monorepo` only after explicitly deciding that root-level
+configuration is wanted.
 
 Apply after reviewing the plan:
 

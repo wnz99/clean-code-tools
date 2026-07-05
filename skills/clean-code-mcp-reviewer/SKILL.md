@@ -21,6 +21,17 @@ This skill is self-contained. Do not assume separate language-specific
 clean-code skills are installed. Use the language heuristics below when judging
 Python, JavaScript, TypeScript, or React code.
 
+## Installing Or Updating This Skill
+
+When the user asks to install or update this Codex skill itself, do not run the
+linting configurator. From a clone of `wnz99/clean-code-tools`, run:
+
+```bash
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --replace
+```
+
+Then tell the user to restart Codex before expecting the updated skill behavior.
+
 ## Installing Clean-Code Linting
 
 When the user asks to install, configure, adopt, bootstrap, or integrate the
@@ -65,6 +76,10 @@ Before applying, it creates a Git rollback point by default: a
 Use `--repo /path/to/repo` when the current directory is not the target repo.
 Use `--target path/to/package` for monorepos when the clean-code config belongs
 to a nested package or app inside `--repo`.
+At a detected monorepo root, the installer should report a blocker rather than
+`status: safe to apply`. Prefer a targeted package/service plan. Use
+`--allow-root-monorepo` only after the user explicitly approves root-level
+configuration.
 Use `--skip-install` only for dry integration tests or when the user wants file
 changes but will install dependencies separately. Use `--allow-dirty` only when
 the user explicitly accepts applying changes over an uncommitted worktree.

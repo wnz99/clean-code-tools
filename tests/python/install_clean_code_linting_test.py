@@ -62,7 +62,7 @@ class CleanCodeInstallerTest(unittest.TestCase):
             self.assertEqual(plan.verification[0].command, ["pnpm", "run", "lint"])
             self.assertIn("ancestor", plan.warnings[0])
 
-    def test_workspace_root_pnpm_install_is_explicitly_root_scoped(self) -> None:
+    def test_workspace_root_requires_explicit_monorepo_approval(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp).resolve()
             run_git(repo, "init")
@@ -73,8 +73,27 @@ class CleanCodeInstallerTest(unittest.TestCase):
             with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/pnpm"):
                 plan = installer.build_plan(repo, allow_dirty=True)
 
+            self.assertTrue(any("Root monorepo detected" in blocker for blocker in plan.blockers))
             self.assertIn("-w", plan.commands[0].command)
             self.assertTrue(any("workspace root" in warning for warning in plan.warnings))
+
+    def test_workspace_root_can_be_explicitly_approved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp).resolve()
+            run_git(repo, "init")
+            (repo / "pnpm-workspace.yaml").write_text("packages:\n  - packages/*\n")
+            (repo / "pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n")
+            (repo / "package.json").write_text(json.dumps({"scripts": {"test": "node test.js"}}))
+
+            with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/pnpm"):
+                plan = installer.build_plan(
+                    repo,
+                    allow_dirty=True,
+                    allow_root_monorepo=True,
+                )
+
+            self.assertFalse(any("Root monorepo detected" in blocker for blocker in plan.blockers))
+            self.assertIn("-w", plan.commands[0].command)
 
     def test_rollback_point_creates_branch_and_dirty_patch_backup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
