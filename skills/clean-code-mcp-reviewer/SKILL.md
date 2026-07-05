@@ -27,10 +27,12 @@ When the user asks to install or update this Codex skill itself, do not run the
 linting configurator. From a clone of `wnz99/clean-code-tools`, run:
 
 ```bash
-python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --replace
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex --replace
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent claude --replace
 ```
 
-Then tell the user to restart Codex before expecting the updated skill behavior.
+Choose the agent the user actually uses. Then tell the user to restart the
+agent before expecting the updated skill behavior.
 
 ## Installing Clean-Code Linting
 
@@ -55,6 +57,61 @@ Ruff, and Pylint configuration, and prints:
 - blockers that require a manual integration strategy
 - warnings such as missing lint scripts
 - recommended verification commands to run after applying
+
+When the user asks to inspect or plan installation, finish with a concrete
+`Clean-Code Installation Plan`. Do not end with a loose recommendation. The
+plan must be specific enough that another LLM or operator can follow it without
+reconstructing the scan.
+
+Use this output shape:
+
+```markdown
+## Clean-Code Installation Plan
+
+### Decision
+<Apply root installer | target package/service | manual merge | defer>, with one
+sentence explaining why.
+
+### Evidence
+- Repo shape: <monorepo/workspace/package layout found>
+- Existing tooling: <package manager, lint configs, hooks, scripts>
+- Installer dry runs: <commands run and statuses>
+
+### Phase 1: Shared Tooling
+- Goal: <what this phase installs/configures>
+- Command(s):
+  ```bash
+  <exact dry-run or apply command>
+  ```
+- Expected files/packages: <specific files and dependencies>
+- Requires approval before apply: yes
+
+### Phase 2: Targeted Rollout
+- Target: <package/service path>
+- Action: <automatic installer apply | manual ESLint merge | manual Python merge>
+- Command or edit:
+  ```bash
+  <exact command, or exact import/config snippet for manual merge>
+  ```
+- Verification:
+  ```bash
+  <target-specific lint/test/typecheck command>
+  ```
+
+### Deferred Or Skipped
+- <hooks/runtime/root ESLint/Python policy/etc. and why>
+
+### Rollback
+- <backup branch/patch behavior or manual revert command>
+
+### Open Questions
+- <only questions that block applying the plan>
+```
+
+If multiple targets are appropriate, list each target as its own Phase 2 item.
+If root dry-run says `status: safe to apply` but repo evidence shows a monorepo
+or project-local lint policy, override the mechanical result in the plan and
+recommend `--target` or manual merges instead.
 
 Apply only when the plan says `status: safe to apply` and the user has asked to
 proceed:

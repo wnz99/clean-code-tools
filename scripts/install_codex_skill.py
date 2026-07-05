@@ -9,6 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SKILL_NAME = "clean-code-mcp-reviewer"
 DEFAULT_SOURCE = REPO_ROOT / "skills" / DEFAULT_SKILL_NAME
+AGENTS = ("claude", "codex")
 
 
 class InstallError(Exception):
@@ -28,11 +29,10 @@ class InstallError(Exception):
         )
 
 
-def default_dest_root() -> Path:
-    codex_home = os.environ.get("CODEX_HOME")
-    if codex_home:
-        return Path(codex_home).expanduser() / "skills"
-    return Path.home() / ".codex" / "skills"
+def default_dest_root(agent: str) -> Path:
+    if agent == "codex":
+        return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser() / "skills"
+    return Path.home() / ".claude" / "skills"
 
 
 def validate_skill_source(source: Path) -> None:
@@ -71,9 +71,15 @@ def install_skill(source: Path, dest_root: Path, *, name: str, replace: bool, dr
 
 
 def parser() -> argparse.ArgumentParser:
-    cli = argparse.ArgumentParser(description="Install the clean-code Codex skill locally.")
+    cli = argparse.ArgumentParser(description="Install the clean-code agent skill locally.")
+    cli.add_argument(
+        "--agent",
+        choices=AGENTS,
+        default="codex",
+        help="Agent skills directory to target when --dest is not set.",
+    )
     cli.add_argument("--source", default=str(DEFAULT_SOURCE), help="Skill source directory.")
-    cli.add_argument("--dest", default=str(default_dest_root()), help="Destination skills directory.")
+    cli.add_argument("--dest", help="Destination skills directory.")
     cli.add_argument("--name", default=DEFAULT_SKILL_NAME, help="Installed skill directory name.")
     cli.add_argument("--replace", action="store_true", help="Overwrite an existing installed skill.")
     cli.add_argument("--dry-run", action="store_true", help="Print the destination without copying files.")
@@ -82,10 +88,11 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = parser().parse_args()
+    dest_root = Path(args.dest) if args.dest else default_dest_root(args.agent)
     try:
         destination = install_skill(
             Path(args.source),
-            Path(args.dest),
+            dest_root,
             name=args.name,
             replace=args.replace,
             dry_run=args.dry_run,
