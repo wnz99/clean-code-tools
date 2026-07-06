@@ -4,11 +4,15 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SKILL_NAME = "clean-code-mcp-reviewer"
 DEFAULT_SOURCE = REPO_ROOT / "skills" / DEFAULT_SKILL_NAME
+DEFAULT_REMOTE_URL = "https://github.com/wnz99/clean-code-tools.git"
+DEFAULT_UPDATE_BRANCH = "main"
 AGENTS = ("claude", "codex")
 
 
@@ -28,6 +32,10 @@ class InstallError(Exception):
             "Use --replace to overwrite the installed skill."
         )
 
+    @classmethod
+    def failed_git_command(cls, output: str) -> InstallError:
+        return cls(f"Failed to fetch the latest skill source:\n{output.strip()}")
+
 
 def default_dest_root(agent: str) -> Path:
     if agent == "codex":
@@ -46,6 +54,44 @@ def copy_ignore(_directory: str, names: list[str]) -> set[str]:
     ignored = {"__pycache__"}
     ignored.update(name for name in names if name.endswith(".pyc"))
     return ignored
+
+
+def run(command: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if completed.returncode != 0:
+        raise InstallError.failed_git_command(completed.stdout)
+    return completed
+
+
+def fetch_skill_source_from_main(
+    *,
+    remote_url: str,
+    branch: str,
+    workspace: Path,
+    skill_name: str,
+) -> Path:
+    workspace.mkdir(parents=True, exist_ok=True)
+    checkout = workspace / "clean-code-tools"
+    run(
+        [
+            "git",
+            "clone",
+            "--depth",
+            "1",
+            "--branch",
+            branch,
+            remote_url,
+            str(checkout),
+        ],
+    )
+    return checkout / "skills" / skill_name
 
 
 def install_skill(source: Path, dest_root: Path, *, name: str, replace: bool, dry_run: bool) -> Path:
@@ -83,15 +129,40 @@ def parser() -> argparse.ArgumentParser:
     cli.add_argument("--name", default=DEFAULT_SKILL_NAME, help="Installed skill directory name.")
     cli.add_argument("--replace", action="store_true", help="Overwrite an existing installed skill.")
     cli.add_argument("--dry-run", action="store_true", help="Print the destination without copying files.")
+    cli.add_argument(
+        "--from-main",
+        action="store_true",
+        help="Fetch the latest skill from the clean-code-tools main branch before installing.",
+    )
+    cli.add_argument(
+        "--remote-url",
+        default=DEFAULT_REMOTE_URL,
+        help="Git remote used by --from-main.",
+    )
+    cli.add_argument(
+        "--branch",
+        default=DEFAULT_UPDATE_BRANCH,
+        help="Git branch used by --from-main.",
+    )
     return cli
 
 
 def main() -> None:
     args = parser().parse_args()
     dest_root = Path(args.dest) if args.dest else default_dest_root(args.agent)
+    temp_dir: tempfile.TemporaryDirectory[str] | None = None
     try:
+        source = Path(args.source)
+        if args.from_main:
+            temp_dir = tempfile.TemporaryDirectory()
+            source = fetch_skill_source_from_main(
+                remote_url=args.remote_url,
+                branch=args.branch,
+                workspace=Path(temp_dir.name),
+                skill_name=args.name,
+            )
         destination = install_skill(
-            Path(args.source),
+            source,
             dest_root,
             name=args.name,
             replace=args.replace,
@@ -99,6 +170,9 @@ def main() -> None:
         )
     except InstallError as exc:
         raise SystemExit(str(exc)) from exc
+    finally:
+        if temp_dir is not None:
+            temp_dir.cleanup()
     action = "Would install" if args.dry_run else "Installed"
     print(f"{action} {args.name} to {destination}")
     if not args.dry_run:

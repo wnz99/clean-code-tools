@@ -87,6 +87,17 @@ python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex -
 python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent claude --replace
 ```
 
+To update directly from the latest `main` branch, use `--from-main`:
+
+```bash
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex --replace --from-main
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent claude --replace --from-main
+```
+
+This clones `https://github.com/wnz99/clean-code-tools.git` at `main` into a
+temporary directory and installs the skill from that checkout, so the local clone
+does not need to be current before updating the installed skill.
+
 Restart the agent after installation so the skill is discovered.
 
 Then ask the agent from inside the target repo:
