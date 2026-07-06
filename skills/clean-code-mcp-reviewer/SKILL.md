@@ -31,8 +31,19 @@ python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex -
 python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent claude --replace
 ```
 
-Choose the agent the user actually uses. Then tell the user to restart the
-agent before expecting the updated skill behavior.
+To fetch and install the latest published skill from the repository `main`
+branch, use the update command instead:
+
+```bash
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex --replace --from-main
+python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent claude --replace --from-main
+```
+
+Choose the agent the user actually uses. The update command clones
+`https://github.com/wnz99/clean-code-tools.git` at `main` into a temporary
+directory and installs the skill from that checkout, so it does not depend on
+the local clone being up to date. Then tell the user to restart the agent before
+expecting the updated skill behavior.
 
 ## Installing Clean-Code Linting
 

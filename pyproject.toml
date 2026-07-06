@@ -188,6 +188,9 @@ split-on-trailing-comma = true
 "scripts/**/*.py" = [
   "T201",
 ]
+"scripts/install_codex_skill.py" = [
+  "S603",
+]
 "scripts/check_*.py" = [
   "S101",
   "PLC0415",

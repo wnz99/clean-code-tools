@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -24,6 +25,10 @@ def load_installer():
 
 
 installer = load_installer()
+
+
+def run_git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)  # noqa: S603,S607
 
 
 class InstallCodexSkillTest(unittest.TestCase):
@@ -163,6 +168,90 @@ class InstallCodexSkillTest(unittest.TestCase):
                 installer.main()
 
             self.assertIn("Would install", output.getvalue())
+
+    def test_fetch_skill_source_from_main_clones_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            remote = root / "remote"
+            remote.mkdir()
+            run_git(remote, "init", "-b", "main")
+            run_git(remote, "config", "user.email", "test@example.com")
+            run_git(remote, "config", "user.name", "Test User")
+            skill = remote / "skills" / "clean-code-mcp-reviewer"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("---\nname: clean-code-mcp-reviewer\ndescription: test\n---\n")
+            run_git(remote, "add", "skills")
+            run_git(remote, "commit", "-m", "skill")
+
+            source = installer.fetch_skill_source_from_main(
+                remote_url=str(remote),
+                branch="main",
+                workspace=root / "workspace",
+                skill_name="clean-code-mcp-reviewer",
+            )
+
+            self.assertTrue((source / "SKILL.md").exists())
+
+    def test_main_from_main_installs_latest_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            remote = root / "remote"
+            remote.mkdir()
+            run_git(remote, "init", "-b", "main")
+            run_git(remote, "config", "user.email", "test@example.com")
+            run_git(remote, "config", "user.name", "Test User")
+            skill = remote / "skills" / "clean-code-mcp-reviewer"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("---\nname: clean-code-mcp-reviewer\ndescription: from main\n---\n")
+            run_git(remote, "add", "skills")
+            run_git(remote, "commit", "-m", "skill")
+
+            output = io.StringIO()
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "install_codex_skill.py",
+                        "--agent",
+                        "codex",
+                        "--dest",
+                        str(root / "codex" / "skills"),
+                        "--from-main",
+                        "--remote-url",
+                        str(remote),
+                        "--replace",
+                    ],
+                ),
+                redirect_stdout(output),
+            ):
+                installer.main()
+
+            installed = root / "codex" / "skills" / "clean-code-mcp-reviewer" / "SKILL.md"
+            self.assertIn("from main", installed.read_text())
+            self.assertIn("Installed clean-code-mcp-reviewer", output.getvalue())
+
+    def test_main_from_main_converts_git_failure_to_system_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "install_codex_skill.py",
+                        "--dest",
+                        str(root / "codex" / "skills"),
+                        "--from-main",
+                        "--remote-url",
+                        str(root / "missing"),
+                    ],
+                ),
+                self.assertRaises(SystemExit) as exit_error,
+            ):
+                installer.main()
+
+            self.assertIn("Failed to fetch", str(exit_error.exception))
 
     def test_main_converts_install_error_to_system_exit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
