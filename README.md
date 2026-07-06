@@ -140,7 +140,10 @@ python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install
 `--apply` is interactive by default. It asks before modifying config files,
 installing packages, copying the Docker MCP runtime, starting Docker services,
 or installing Git hooks. For automation, use `--yes` only after the plan is
-already approved.
+already approved. Non-interactive applies must make hook intent explicit:
+use `--git-hooks pre-push` for the recommended hook setup or `--git-hooks none`
+to skip hooks intentionally. The installer prints an `apply summary` showing
+which categories were applied and skipped.
 
 For a monorepo target, apply the same `--target` that was used during planning:
 

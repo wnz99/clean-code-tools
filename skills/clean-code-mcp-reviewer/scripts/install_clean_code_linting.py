@@ -113,6 +113,18 @@ class ApplyOptions:
 
 
 @dataclass
+class ApplySummary:
+    applied: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+
+    def mark_applied(self, label: str) -> None:
+        self.applied.append(label)
+
+    def mark_skipped(self, label: str, reason: str) -> None:
+        self.skipped.append(f"{label}: {reason}")
+
+
+@dataclass
 class Plan:
     repo: Path
     git_root: Path
@@ -661,6 +673,27 @@ def plan_git_hooks(repo: Path, plan: Plan, *, choice: str, mode: str) -> None:
         )
 
 
+def describe_hook_selection(choice: str, *, apply: bool, assume_yes: bool) -> str:
+    if choice == "ask":
+        if apply and assume_yes:
+            return "unresolved; --apply --yes must pass --git-hooks none, pre-push, pre-commit, or both"
+        if apply:
+            return f"ask interactively during apply; default {RECOMMENDED_HOOK_CHOICE}"
+        return f"not selected in this dry run; use --git-hooks {RECOMMENDED_HOOK_CHOICE} to plan hooks"
+    hooks = selected_hooks(choice)
+    if not hooks:
+        return "none selected"
+    return f"{', '.join(hooks)} in advisory mode by default"
+
+
+def add_noninteractive_hook_blocker(plan: Plan, *, apply: bool, assume_yes: bool, hook_choice: str) -> None:
+    if apply and assume_yes and hook_choice == "ask":
+        plan.blockers.append(
+            "--apply --yes requires an explicit hook decision. Pass --git-hooks pre-push "
+            "for the recommended hook setup, or --git-hooks none to intentionally skip hooks."
+        )
+
+
 def add_clean_code_to_eslint_array(text: str) -> str:
     import_line = 'import cleanCode from "clean-code-tools/configs/eslint.clean-code.recommended.mjs";\n'
     if import_line not in text:
@@ -880,86 +913,148 @@ def parser() -> argparse.ArgumentParser:
     return parser
 
 
-def apply_lint_config_if_approved(plan: Plan, *, assume_yes: bool) -> None:
+def apply_lint_config_if_approved(
+    plan: Plan,
+    *,
+    assume_yes: bool,
+    summary: ApplySummary,
+) -> None:
     if not plan.languages:
+        summary.mark_skipped("lint configuration", "no supported languages detected")
         return
     if confirm("Modify lint configuration files", assume_yes=assume_yes):
         apply_lint_config(plan)
+        summary.mark_applied("lint configuration files")
         return
+    summary.mark_skipped("lint configuration", "approval declined or unavailable")
     print("skipped: lint configuration files were not modified")
 
 
-def apply_runtime_if_approved(repo: Path, *, wants_mcp_runtime: bool, assume_yes: bool) -> None:
+def apply_runtime_if_approved(
+    repo: Path,
+    *,
+    wants_mcp_runtime: bool,
+    assume_yes: bool,
+    summary: ApplySummary,
+) -> None:
     if not wants_mcp_runtime:
+        summary.mark_skipped("MCP runtime", "not requested")
         return
     if confirm(f"Create {MCP_RUNTIME_TARGET}/ Docker MCP runtime files", assume_yes=assume_yes):
         apply_mcp_runtime(repo)
+        summary.mark_applied(f"{MCP_RUNTIME_TARGET}/ runtime files")
         return
+    summary.mark_skipped("MCP runtime", "approval declined or unavailable")
     print(f"skipped: {MCP_RUNTIME_TARGET}/ was not created")
 
 
-def apply_hooks_if_approved(repo: Path, *, hook_choice: str, mode: str, assume_yes: bool) -> None:
+def apply_hooks_if_approved(
+    repo: Path,
+    *,
+    hook_choice: str,
+    mode: str,
+    assume_yes: bool,
+    summary: ApplySummary,
+) -> None:
     if not selected_hooks(hook_choice):
+        summary.mark_skipped("Git hooks", f"choice was {hook_choice}")
         return
     if confirm("Install clean-code Git hook feedback", assume_yes=assume_yes):
         apply_git_hooks(repo, choice=hook_choice, mode=mode)
+        summary.mark_applied(f"Git hooks ({hook_choice}, {mode})")
         return
+    summary.mark_skipped("Git hooks", "approval declined or unavailable")
     print("skipped: Git hooks were not installed")
 
 
-def install_packages_if_approved(plan: Plan, *, skip_install: bool, assume_yes: bool) -> None:
+def install_packages_if_approved(
+    plan: Plan,
+    *,
+    skip_install: bool,
+    assume_yes: bool,
+    summary: ApplySummary,
+) -> None:
     if skip_install:
+        summary.mark_skipped("package installation", "--skip-install was passed")
         print("skipped: package installation disabled by --skip-install")
         return
     if not has_commands(plan, "dependency-install"):
+        summary.mark_skipped("package installation", "no dependency install commands planned")
         return
     if confirm("Install clean-code lint packages as development dependencies", assume_yes=assume_yes):
         run_planned_commands(plan, category="dependency-install")
+        summary.mark_applied("development dependencies")
         return
+    summary.mark_skipped("package installation", "approval declined or unavailable")
     print("skipped: lint packages were not installed")
 
 
-def start_runtime_if_approved(plan: Plan, *, assume_yes: bool) -> None:
+def start_runtime_if_approved(plan: Plan, *, assume_yes: bool, summary: ApplySummary) -> None:
     if not has_commands(plan, "docker-runtime"):
+        summary.mark_skipped("MCP runtime start", "not requested")
         return
     if confirm("Build and start the Dockerized clean-code MCP runtime", assume_yes=assume_yes):
         run_planned_commands(plan, category="docker-runtime")
+        summary.mark_applied("Dockerized MCP runtime start")
         return
+    summary.mark_skipped("MCP runtime start", "approval declined or unavailable")
     print("skipped: Dockerized clean-code MCP runtime was not started")
+
+
+def print_apply_summary(summary: ApplySummary) -> None:
+    print("\napply summary:")
+    if summary.applied:
+        print("applied:")
+        for item in summary.applied:
+            print(f"- {item}")
+    else:
+        print("applied: none")
+    if summary.skipped:
+        print("skipped:")
+        for item in summary.skipped:
+            print(f"- {item}")
 
 
 def apply_requested_setup(plan: Plan, options: ApplyOptions) -> None:
     if not plan.can_apply:
         raise SystemExit(1)
+    summary = ApplySummary()
     if options.create_backup:
         print("\nrollback point:")
         for note in create_rollback_point(plan.repo):
             print(f"- {note}")
-    apply_lint_config_if_approved(plan, assume_yes=options.assume_yes)
+        summary.mark_applied("rollback point")
+    else:
+        summary.mark_skipped("rollback point", "--no-backup was passed")
+    apply_lint_config_if_approved(plan, assume_yes=options.assume_yes, summary=summary)
     apply_runtime_if_approved(
         plan.repo,
         wants_mcp_runtime=options.wants_mcp_runtime,
         assume_yes=options.assume_yes,
+        summary=summary,
     )
     apply_hooks_if_approved(
         plan.repo,
         hook_choice=options.hook_choice,
         mode=options.hook_mode,
         assume_yes=options.assume_yes,
+        summary=summary,
     )
     install_packages_if_approved(
         plan,
         skip_install=options.skip_install,
         assume_yes=options.assume_yes,
+        summary=summary,
     )
-    start_runtime_if_approved(plan, assume_yes=options.assume_yes)
+    start_runtime_if_approved(plan, assume_yes=options.assume_yes, summary=summary)
     if plan.verification:
         print("\nrecommended verification:")
         for planned in plan.verification:
             cwd = planned.cwd or plan.repo
             cwd_note = f" (cwd: {cwd})" if cwd != plan.repo else ""
             print(f"- {' '.join(planned.command)}{cwd_note}")
-    print("\nfinished: requested clean-code setup steps processed")
+    print_apply_summary(summary)
+    print("\nfinished: clean-code installer apply completed with the summary above")
 
 
 def main() -> None:
@@ -975,6 +1070,12 @@ def main() -> None:
         require_languages=not wants_mcp_runtime,
         allow_root_monorepo=args.allow_root_monorepo,
     )
+    add_noninteractive_hook_blocker(
+        plan,
+        apply=args.apply,
+        assume_yes=args.yes,
+        hook_choice=args.git_hooks,
+    )
     if wants_mcp_runtime:
         plan_mcp_runtime(target_repo, plan, start=args.start_mcp_runtime)
     hook_choice = resolve_hook_choice(args.git_hooks) if args.apply else args.git_hooks
@@ -984,6 +1085,9 @@ def main() -> None:
         plan.warnings.append(
             "Git hook setup will be offered during --apply. Use --git-hooks none to skip the prompt."
         )
+    plan.warnings.append(
+        f"Git hook selection: {describe_hook_selection(args.git_hooks, apply=args.apply, assume_yes=args.yes)}."
+    )
     print_plan(plan)
     if args.apply:
         apply_requested_setup(
