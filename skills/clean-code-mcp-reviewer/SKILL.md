@@ -125,6 +125,14 @@ host-side action it offers: modifying lint config files, installing packages,
 copying the Docker MCP runtime, starting Docker services, or installing Git
 hooks. For non-interactive automation, pass `--yes` only after the user has
 already approved the whole plan and each selected setup category is intentional.
+When using `--apply --yes`, always pass an explicit hook decision:
+`--git-hooks pre-push` for the recommended hook setup or `--git-hooks none` to
+skip hooks intentionally. The installer treats an unresolved hook choice as a
+blocker so hooks cannot be silently dropped.
+
+After apply, read the installer's `apply summary` before reporting completion.
+It lists applied categories and skipped categories, including skipped hooks,
+skipped dependency installation, skipped runtime setup, and backup behavior.
 Before applying, it creates a Git rollback point by default: a
 `backup/clean-code-install-<timestamp>` branch, plus patch files under
 `.git/clean-code-installer-backups/` when applying over a dirty worktree. Use
