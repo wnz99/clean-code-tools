@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -15,12 +17,13 @@ PYTHON_TEMPLATE = SKILL_ROOT / "templates" / "python.clean-code.pyproject.toml"
 KNIP_CONFIG_NAME = "knip.json"
 FALLOW_CONFIG_NAME = ".fallowrc.json"
 MCP_RUNTIME_FILES = (
-    SKILL_ROOT / ".dockerignore",
-    SKILL_ROOT / "Dockerfile",
-    SKILL_ROOT / "compose.yaml",
     SKILL_ROOT / "runtime",
 )
 MCP_RUNTIME_TARGET = ".clean-code-mcp"
+MCP_RUNTIME_PORT_ENV = "CLEAN_CODE_MCP_PORT"
+MAX_TCP_PORT = 65535
+MCP_RUNTIME_REQUIRED_MODULES = ("pydantic", "fastmcp", "fastembed", "sqlite_vec")
+MCP_RUNTIME_REQUIRED_PACKAGES = ("pydantic", "fastmcp", "fastembed", "sqlite-vec")
 HOOK_SOURCE = SKILL_ROOT / "hooks" / "clean_code_agent_feedback.py"
 HOOK_CATALOG_SOURCE = SKILL_ROOT / "catalog" / "clean_code_review_triggers.json"
 HOOK_SCRIPT_NAME = "clean_code_agent_feedback.py"
@@ -568,8 +571,6 @@ def build_plan(
 
 
 def plan_mcp_runtime(repo: Path, plan: Plan, *, start: bool) -> None:
-    if shutil.which("docker") is None:
-        plan.blockers.append("Docker is required for the bundled MCP runtime but was not found.")
     target = repo / MCP_RUNTIME_TARGET
     if target.exists():
         plan.blockers.append(f"{MCP_RUNTIME_TARGET} already exists. Remove it or merge the runtime manually.")
@@ -577,25 +578,58 @@ def plan_mcp_runtime(repo: Path, plan: Plan, *, start: bool) -> None:
     plan.changes.append(
         Change(
             f"create {MCP_RUNTIME_TARGET}/",
-            "Copy the bundled Dockerfile, Compose file, MCP server runtime, and clean-code corpus.",
+            "Copy the bundled Python MCP server runtime and clean-code corpus.",
         )
     )
     if start:
+        port = mcp_runtime_port(plan)
+        missing_modules = missing_runtime_modules()
+        if missing_modules:
+            install_hint = " ".join(MCP_RUNTIME_REQUIRED_PACKAGES)
+            plan.blockers.append(
+                "Cannot start the local MCP runtime because this Python cannot import "
+                f"{', '.join(missing_modules)}. Install runtime dependencies first with "
+                f"`{sys.executable} -m pip install {install_hint}`, or rerun without "
+                "--start-mcp-runtime."
+            )
+            return
         plan.commands.append(
             PlannedCommand(
-                "start Dockerized clean-code MCP runtime",
+                "start local clean-code MCP runtime",
                 [
-                    "docker",
-                    "compose",
-                    "-f",
-                    f"{MCP_RUNTIME_TARGET}/compose.yaml",
-                    "up",
-                    "--build",
-                    "-d",
+                    sys.executable,
+                    f"{MCP_RUNTIME_TARGET}/runtime/scripts/clean_code_mcp_server.py",
+                    "--transport",
+                    "http",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(port),
                 ],
-                "docker-runtime",
+                "mcp-runtime",
             )
         )
+
+
+def mcp_runtime_port(plan: Plan) -> int:
+    raw_port = os.environ.get(MCP_RUNTIME_PORT_ENV, "8765").strip()
+    try:
+        port = int(raw_port)
+    except ValueError:
+        plan.blockers.append(f"{MCP_RUNTIME_PORT_ENV} must be an integer port.")
+        return 8765
+    if port < 1 or port > MAX_TCP_PORT:
+        plan.blockers.append(f"{MCP_RUNTIME_PORT_ENV} must be between 1 and {MAX_TCP_PORT}.")
+        return 8765
+    return port
+
+
+def missing_runtime_modules() -> list[str]:
+    return [
+        module
+        for module in MCP_RUNTIME_REQUIRED_MODULES
+        if importlib.util.find_spec(module) is None
+    ]
 
 
 def git_hooks_dir(repo: Path) -> Path:
@@ -799,6 +833,7 @@ def has_commands(plan: Plan, category: str) -> bool:
 def apply_mcp_runtime(repo: Path) -> None:
     target = repo / MCP_RUNTIME_TARGET
     target.mkdir()
+    (target / "data").mkdir()
     for source in MCP_RUNTIME_FILES:
         destination = target / source.name
         if source.is_dir():
@@ -888,15 +923,11 @@ def parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--no-backup", action="store_true", help="Do not create a Git rollback point before --apply.")
     parser.add_argument("--skip-install", action="store_true", help="Modify files without running package installers.")
-    parser.add_argument(
-        "--mcp-runtime",
-        action="store_true",
-        help=f"Also copy the Dockerized MCP runtime into {MCP_RUNTIME_TARGET}/.",
-    )
+    parser.add_argument("--mcp-runtime", action="store_true", help=f"Also copy the local MCP runtime into {MCP_RUNTIME_TARGET}/.")
     parser.add_argument(
         "--start-mcp-runtime",
         action="store_true",
-        help="After applying, run the Dockerized Weaviate + MCP stack.",
+        help="After applying, run the local clean-code MCP server.",
     )
     parser.add_argument(
         "--git-hooks",
@@ -940,7 +971,7 @@ def apply_runtime_if_approved(
     if not wants_mcp_runtime:
         summary.mark_skipped("MCP runtime", "not requested")
         return
-    if confirm(f"Create {MCP_RUNTIME_TARGET}/ Docker MCP runtime files", assume_yes=assume_yes):
+    if confirm(f"Create {MCP_RUNTIME_TARGET}/ local MCP runtime files", assume_yes=assume_yes):
         apply_mcp_runtime(repo)
         summary.mark_applied(f"{MCP_RUNTIME_TARGET}/ runtime files")
         return
@@ -990,15 +1021,15 @@ def install_packages_if_approved(
 
 
 def start_runtime_if_approved(plan: Plan, *, assume_yes: bool, summary: ApplySummary) -> None:
-    if not has_commands(plan, "docker-runtime"):
+    if not has_commands(plan, "mcp-runtime"):
         summary.mark_skipped("MCP runtime start", "not requested")
         return
-    if confirm("Build and start the Dockerized clean-code MCP runtime", assume_yes=assume_yes):
-        run_planned_commands(plan, category="docker-runtime")
-        summary.mark_applied("Dockerized MCP runtime start")
+    if confirm("Start the local clean-code MCP runtime", assume_yes=assume_yes):
+        run_planned_commands(plan, category="mcp-runtime")
+        summary.mark_applied("local MCP runtime start")
         return
     summary.mark_skipped("MCP runtime start", "approval declined or unavailable")
-    print("skipped: Dockerized clean-code MCP runtime was not started")
+    print("skipped: local clean-code MCP runtime was not started")
 
 
 def print_apply_summary(summary: ApplySummary) -> None:

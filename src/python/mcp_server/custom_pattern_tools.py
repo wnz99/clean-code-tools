@@ -40,15 +40,14 @@ def upsert_clean_code_pattern_payload(
         request.pattern,
         path=request.custom_patterns_path,
     )
-    if request.sync_weaviate:
+    if request.sync_index:
         try:
             semantic.upsert_chunk(
                 chunk=semantic.custom_pattern_chunk(
                     request.pattern,
                     path=request.custom_patterns_path,
                 ),
-                url=request.weaviate_url,
-                collection_name=request.collection,
+                index_path=request.index_path or semantic.DEFAULT_INDEX_PATH,
                 model_name=request.model,
             )
         except Exception:
@@ -62,7 +61,7 @@ def upsert_clean_code_pattern_payload(
         "pattern_id": request.pattern.id,
         "created": created,
         "updated": not created,
-        "synced_weaviate": request.sync_weaviate,
+        "synced_index": request.sync_index,
         "custom_patterns_path": str(semantic.custom_patterns_path(request.custom_patterns_path)),
         "pattern": stored,
     }
@@ -72,17 +71,15 @@ def delete_custom_clean_code_pattern_payload(
     pattern_id: str,
     custom_patterns_path: str | None = None,
     *,
-    sync_weaviate: bool = True,
-    weaviate_url: str,
-    collection: str,
+    sync_index: bool = True,
+    index_path: str | None = None,
 ) -> dict[str, Any]:
     request = semantic.DeleteCustomPatternRequest.model_validate(
         {
             "pattern_id": pattern_id,
             "custom_patterns_path": custom_patterns_path,
-            "sync_weaviate": sync_weaviate,
-            "weaviate_url": weaviate_url,
-            "collection": collection,
+            "sync_index": sync_index,
+            "index_path": index_path,
         }
     )
     pattern = semantic.custom_pattern_by_id(
@@ -96,16 +93,15 @@ def delete_custom_clean_code_pattern_payload(
         request.pattern_id,
         path=request.custom_patterns_path,
     )
-    deleted_weaviate = False
-    if request.sync_weaviate and pattern is not None:
+    deleted_index = False
+    if request.sync_index and pattern is not None:
         try:
-            deleted_weaviate = semantic.delete_chunk(
+            deleted_index = semantic.delete_chunk(
                 chunk=semantic.custom_pattern_chunk(
                     pattern,
                     path=request.custom_patterns_path,
                 ),
-                url=request.weaviate_url,
-                collection_name=request.collection,
+                index_path=request.index_path or semantic.DEFAULT_INDEX_PATH,
             )
         except Exception:
             restore_custom_patterns(
@@ -117,7 +113,7 @@ def delete_custom_clean_code_pattern_payload(
     return {
         "pattern_id": request.pattern_id,
         "deleted": deleted,
-        "deleted_weaviate": deleted_weaviate,
+        "deleted_index": deleted_index,
         "custom_patterns_path": str(semantic.custom_patterns_path(request.custom_patterns_path)),
     }
 

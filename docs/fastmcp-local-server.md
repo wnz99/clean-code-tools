@@ -8,23 +8,13 @@ the lower-level chunk search for diagnostics.
 
 ```bash
 bun install
-uv sync
+uv sync --group mcp
 ```
 
-## Prepare Weaviate
+## Prepare Local Index
 
 ```bash
-bun run weaviate:dev:start
-bun run weaviate:dev:smoke
-bun run semantic:ingest -- --reset
-```
-
-If the default port is busy, use the same alternate port for all commands:
-
-```bash
-WEAVIATE_HTTP_PORT=38080 WEAVIATE_GRPC_PORT=35051 bun run weaviate:dev:start
-WEAVIATE_HTTP_PORT=38080 bun run weaviate:dev:smoke
-bun run semantic:ingest -- --url http://127.0.0.1:38080 --reset
+bun run semantic:ingest
 ```
 
 ## Run MCP
@@ -43,19 +33,22 @@ bun run mcp:http
 
 The HTTP server defaults to `http://127.0.0.1:8765`.
 
+Search tools are read-only: build the sqlite-vec index with
+`bun run semantic:ingest` before calling them.
+
 ## Exposed Tools
 
 - `clean_code_corpus_summary`: returns corpus chunk counts.
-- `clean_code_weaviate_schema`: returns the `CleanCodeChunks` schema payload.
-- `search_clean_code`: low-level compatibility search over populated Weaviate chunks.
+- `clean_code_index_info`: returns sqlite-vec index metadata.
+- `search_clean_code`: low-level compatibility search over indexed chunks.
 - `search_clean_code_patterns`: pattern-first search for concrete code smells.
 - `get_clean_code_pattern`: full lookup by built-in `CC-###` or custom pattern ID.
 - `recommend_clean_code_lint_rules`: lint-rule candidate guidance for repeated smells.
 - `list_clean_code_facets`: available filter values and counts.
 - `validate_clean_code_pattern`: validate a custom pattern payload without writing it.
 - `list_custom_clean_code_patterns`: list custom pattern records from the configured JSONL store.
-- `upsert_clean_code_pattern`: validate and store a custom pattern, optionally syncing Weaviate.
-- `delete_custom_clean_code_pattern`: delete a custom pattern, optionally syncing Weaviate.
+- `upsert_clean_code_pattern`: validate and store a custom pattern, optionally syncing the local index.
+- `delete_custom_clean_code_pattern`: delete a custom pattern, optionally syncing the local index.
 
 Pattern-first search arguments:
 
@@ -65,7 +58,7 @@ Pattern-first search arguments:
   "language": "typescript",
   "lintability": ["high", "medium"],
   "limit": 5,
-  "weaviate_url": "http://127.0.0.1:8080"
+  "index_path": ".clean-code-index.sqlite"
 }
 ```
 

@@ -149,7 +149,7 @@ python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install
 ```
 
 `--apply` is interactive by default. It asks before modifying config files,
-installing packages, copying the Docker MCP runtime, starting Docker services,
+installing packages, copying the local MCP runtime, starting local services,
 or installing Git hooks. For automation, use `--yes` only after the plan is
 already approved. Non-interactive applies must make hook intent explicit:
 use `--git-hooks pre-push` for the recommended hook setup or `--git-hooks none`
@@ -229,11 +229,9 @@ This repo includes a FastMCP server in `src/python/mcp_server` for local
 clean-code pattern search.
 
 ```bash
-uv sync
+uv sync --group mcp
 bun install
-bun run weaviate:dev:start
-bun run weaviate:dev:smoke
-bun run semantic:ingest -- --reset
+bun run semantic:ingest
 bun run mcp:http
 ```
 
@@ -253,8 +251,8 @@ documented in [docs/fastmcp-local-server.md](docs/fastmcp-local-server.md).
 The MCP server gives coding agents a semantic review layer on top of the static
 lint checks:
 
-- Inspect the available corpus and Weaviate schema with
-  `clean_code_corpus_summary` and `clean_code_weaviate_schema`.
+- Inspect the available corpus and sqlite-vec index metadata with
+  `clean_code_corpus_summary` and `clean_code_index_info`.
 - Search clean-code guidance with `search_clean_code` for low-level chunk
   retrieval or `search_clean_code_patterns` for pattern-first results with
   confidence, scores, match reasons, and filters for language, topic, rule
@@ -270,35 +268,39 @@ lint checks:
 
 Built-in `CC-###` records are read-only. Custom patterns use `CUSTOM-###` or a
 repo namespace such as `BILLING-001`, are validated with Pydantic before writes,
-and can optionally be synced into the local Weaviate collection.
+and can optionally be synced into the local sqlite-vec index.
 
-## Dockerized MCP Runtime
+## Local MCP Runtime
 
-The skill can copy a self-contained Docker runtime into a target repo or host
-folder:
+The skill can copy the Python MCP runtime into a target repo or host folder:
 
 ```bash
 python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --mcp-runtime --apply
 ```
 
-To copy the runtime files, build the images, initialize Weaviate, and start the
-MCP server:
+To copy the runtime files and start the MCP server:
 
 ```bash
 python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --start-mcp-runtime --apply
 ```
 
-This creates `.clean-code-mcp/`. The Compose stack initializes Weaviate by
-ingesting the bundled corpus before starting the FastMCP HTTP server.
+This creates `.clean-code-mcp/`. Starting the copied runtime requires
+`pydantic`, `fastmcp`, `fastembed`, and `sqlite-vec` in the Python interpreter
+running the installer; `--start-mcp-runtime` blocks during planning when those
+modules are missing.
+
+The local sqlite-vec index is stored as a regular SQLite file. Build it before
+searching:
+
+```bash
+python .clean-code-mcp/runtime/scripts/sqlite_vec_ingest_clean_code.py
+```
 
 Default ports:
 
-- Weaviate HTTP: `http://127.0.0.1:8080`
-- Weaviate gRPC: `127.0.0.1:50051`
 - Clean-code MCP HTTP: `http://127.0.0.1:8765`
 
-Override ports with `WEAVIATE_HTTP_PORT`, `WEAVIATE_GRPC_PORT`, and
-`CLEAN_CODE_MCP_PORT`.
+Override the MCP port with `CLEAN_CODE_MCP_PORT`.
 
 ## Static Triggers To Semantic Review
 
@@ -317,14 +319,14 @@ The workflow and `clean-code-review-candidates/v1` schema are documented in
 
 ## Corpus
 
-For vector database ingestion, use `data/clean-code-patterns.jsonl`. It contains
+For vector index ingestion, use `data/clean-code-patterns.jsonl`. It contains
 264 source records with aliases, problem statements, use/avoid guidance, good
 and bad examples, lintability, and source metadata. The expected record shape is
 documented in `data/vector-record.schema.json`.
 
-The JSONL corpus is the source of truth. Weaviate data is a derived index:
+The JSONL corpus is the source of truth. sqlite-vec data is a derived index:
 ingestion generates compact `embeddingText` and readable `displayText` from the
-structured fields, then stores those generated values in Weaviate. Formatting or
+structured fields, then stores those generated values in SQLite. Formatting or
 key-order changes in the JSONL do not matter, but `id` values are stable object
 identity and field names must keep matching the schema.
 
@@ -343,7 +345,6 @@ Requirements:
 
 - Bun `1.3.13`
 - uv
-- Docker, when running Weaviate or the Dockerized MCP runtime
 - Node `^22.13.0 || >=24` for the ESLint package stack
 - Python `>=3.12` for the Python package and local MCP tooling
 
@@ -351,7 +352,7 @@ Install dependencies:
 
 ```bash
 bun install
-uv sync
+uv sync --group mcp
 ```
 
 Run the full check:

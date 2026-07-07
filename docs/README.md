@@ -18,8 +18,8 @@ release operations.
 
 - [FastMCP local server](./fastmcp-local-server.md): run the local MCP server,
   inspect exposed tools, and query clean-code patterns from an agent.
-- [Semantic Weaviate search](./semantic-weaviate.md): run local Weaviate,
-  ingest the pattern corpus, and test semantic retrieval.
+- [Semantic sqlite-vec search](./semantic-sqlite-vec.md): build the local
+  sqlite vector index and test semantic retrieval.
 - [Static trigger to semantic review](./static-trigger-semantic-review.md):
   convert deterministic lint output into clean-code MCP review candidates.
 

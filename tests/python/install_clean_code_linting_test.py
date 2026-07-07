@@ -188,9 +188,18 @@ class CleanCodeInstallerTest(unittest.TestCase):
             installer.add_verification_plan(plan)
             self.assertEqual(plan.verification[0].command, ["ruff", "check", "."])
 
-            with mock.patch.object(installer.shutil, "which", return_value=None):
-                installer.plan_mcp_runtime(repo, plan, start=False)
-            self.assertTrue(any("Docker is required" in blocker for blocker in plan.blockers))
+            installer.plan_mcp_runtime(repo, plan, start=False)
+            self.assertTrue(any(installer.MCP_RUNTIME_TARGET in change.label for change in plan.changes))
+            with mock.patch.object(installer, "missing_runtime_modules", return_value=[]):
+                env = {installer.MCP_RUNTIME_PORT_ENV: "9999"}
+                with mock.patch.dict(installer.os.environ, env, clear=False):
+                    start_plan = installer.Plan(repo=repo, git_root=repo)
+                    installer.plan_mcp_runtime(repo, start_plan, start=True)
+            self.assertEqual(start_plan.commands[0].command[-1], "9999")
+            with mock.patch.object(installer, "missing_runtime_modules", return_value=["fastmcp"]):
+                blocked_plan = installer.Plan(repo=repo, git_root=repo)
+                installer.plan_mcp_runtime(repo, blocked_plan, start=True)
+            self.assertTrue(any("Cannot start" in blocker for blocker in blocked_plan.blockers))
             (repo / installer.MCP_RUNTIME_TARGET).mkdir()
             installer.plan_mcp_runtime(repo, plan, start=True)
             self.assertTrue(any("already exists" in blocker for blocker in plan.blockers))
@@ -279,7 +288,7 @@ class CleanCodeInstallerTest(unittest.TestCase):
                 installer.run_planned_commands(plan, category="dependency-install")
             run_mock.assert_called_once()
             self.assertTrue(installer.has_commands(plan, "dependency-install"))
-            self.assertFalse(installer.has_commands(plan, "docker-runtime"))
+            self.assertFalse(installer.has_commands(plan, "mcp-runtime"))
 
             output = StringIO()
             with redirect_stdout(output):
@@ -293,7 +302,7 @@ class CleanCodeInstallerTest(unittest.TestCase):
             plan.commands.extend(
                 [
                     installer.PlannedCommand("install", ["echo", "install"], "dependency-install", repo),
-                    installer.PlannedCommand("start", ["echo", "start"], "docker-runtime", repo),
+                    installer.PlannedCommand("start", ["echo", "start"], "mcp-runtime", repo),
                 ]
             )
             summary = installer.ApplySummary()
@@ -314,7 +323,7 @@ class CleanCodeInstallerTest(unittest.TestCase):
             self.assertIn(f"{installer.MCP_RUNTIME_TARGET}/ runtime files", summary.applied)
             self.assertIn("Git hooks (pre-push, advisory)", summary.applied)
             self.assertIn("development dependencies", summary.applied)
-            self.assertIn("Dockerized MCP runtime start", summary.applied)
+            self.assertIn("local MCP runtime start", summary.applied)
 
     def test_apply_requested_setup_rejects_empty_plan_and_prints_backup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -433,7 +442,6 @@ class CleanCodeInstallerTest(unittest.TestCase):
             repo = Path(tmp).resolve()
             installer.apply_mcp_runtime(repo)
             runtime = repo / installer.MCP_RUNTIME_TARGET
-            self.assertTrue((runtime / "Dockerfile").exists())
             self.assertTrue((runtime / "runtime").is_dir())
 
 
