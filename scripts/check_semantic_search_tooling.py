@@ -60,48 +60,22 @@ def assert_chunk_contract(semantic: object, chunks: list[object]) -> None:
 
 
 def assert_schema_and_search_contract(semantic: object) -> None:
-    schema = semantic.create_schema_payload()
-    assert schema["class"] == semantic.COLLECTION_NAME
-    assert schema["vectorConfig"][semantic.VECTOR_NAME]["vectorizer"] == {"none": {}}
-    property_names = {property_config["name"] for property_config in schema["properties"]}
-    for required in (
-        "chunkId",
-        "recordId",
-        "sourceFile",
-        "sourceKind",
-        "sectionPath",
-        "ruleFamily",
-        "lintability",
-        "embeddingText",
-        "textHash",
-        "embeddingModel",
-    ):
-        assert required in property_names
+    info = semantic.create_index_info(index_path="clean-code.sqlite")
+    assert info["backend"] == "sqlite-vec"
+    assert info["schema_version"] == semantic.INDEX_SCHEMA_VERSION
+    assert info["index_path"] == "clean-code.sqlite"
+    assert info["tables"]["vec_chunks"]["columns"] == ["chunk_id", "embedding"]
+    assert info["tables"]["chunk_metadata"]["columns"] == ["chunk_id", "object_id", "payload"]
 
-    query = semantic.build_search_graphql_query(
-        collection_name=semantic.COLLECTION_NAME,
-        vector=[0.1, 0.2, 0.3],
-        limit=5,
+    vector = semantic.vector_json([0.1, 0.2, 0.3])
+    assert vector == "[0.1,0.2,0.3]"
+
+    rows = semantic.search_rows_from_sqlite(
+        [("object-id", '{"chunkId":"pattern:CC-043"}', 0.25)]
     )
-    assert "nearVector" in query
-    assert 'targetVectors: ["content"]' in query
-    assert "chunkId recordId sourceFile" in query
-
-    payload = {"data": {"Get": {semantic.COLLECTION_NAME: [{"chunkId": "pattern:CC-043"}]}}}
-    assert semantic.search_rows_from_payload(
-        payload,
-        collection_name=semantic.COLLECTION_NAME,
-    ) == [{"chunkId": "pattern:CC-043"}]
-    assert semantic.search_rows_from_payload({}, collection_name=semantic.COLLECTION_NAME) == []
-    try:
-        semantic.search_rows_from_payload(
-            {"errors": [{"message": "bad query"}]},
-            collection_name=semantic.COLLECTION_NAME,
-        )
-    except RuntimeError as exc:
-        assert "bad query" in str(exc)
-    else:
-        raise AssertionError("expected Weaviate GraphQL errors to raise")
+    assert rows == [
+        {"chunkId": "pattern:CC-043", "_additional": {"id": "object-id", "distance": 0.25}}
+    ]
 
 
 def assert_markdown_contract(semantic: object) -> None:

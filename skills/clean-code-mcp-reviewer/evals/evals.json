@@ -33,8 +33,8 @@
     },
     {
       "id": 7,
-      "prompt": "Set up the clean-code MCP locally for this repo, but do not install Python dependencies directly on the host. Use Docker if the skill provides a runtime.",
-      "expected_output": "The agent plans the bundled Docker MCP runtime install, explains that it will create .clean-code-mcp with Dockerfile, compose.yaml, runtime source, and corpus, then uses --mcp-runtime or --start-mcp-runtime only after approval."
+      "prompt": "Set up the clean-code MCP locally for this repo. Explain where the local vector index is stored and ask before copying or starting anything.",
+      "expected_output": "The agent plans the bundled local MCP runtime install, explains that it will create .clean-code-mcp with runtime source and corpus, stores the sqlite-vec index in a local .sqlite file, then uses --mcp-runtime or --start-mcp-runtime only after approval."
     },
     {
       "id": 8,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import types
@@ -19,7 +20,7 @@ if str(PYTHON_SRC) not in sys.path:
 from mcp_server import (
     corpus,
     custom_patterns,
-    weaviate,
+    sqlite_vec_store,
 )
 from mcp_server.models import MarkdownSection  # noqa: E402
 from mcp_server.pattern_models import (  # noqa: E402
@@ -106,7 +107,7 @@ class CustomPatternModelTest(unittest.TestCase):
                 unsafe_path = str(Path(raw_tmp) / "custom-patterns.jsonl")
                 os.environ["CLEAN_CODE_CUSTOM_PATTERNS_PATH"] = unsafe_path
                 with self.assertRaises(ValueError):
-                    server.upsert_clean_code_pattern(sample_pattern(), sync_weaviate=False)
+                    server.upsert_clean_code_pattern(sample_pattern(), sync_index=False)
                 self.assertFalse(Path(unsafe_path).exists())
         finally:
             if original_env_path is None:
@@ -219,7 +220,7 @@ class CustomPatternStorageTest(unittest.TestCase):
 
 
 class CustomPatternToolTest(unittest.TestCase):
-    def test_server_tools_validate_write_and_delete_without_weaviate(self) -> None:
+    def test_server_tools_validate_write_and_delete_without_index_sync(self) -> None:
         from mcp_server import server
 
         with tempfile.TemporaryDirectory() as raw_tmp, TemporaryCustomPatternBase(raw_tmp):
@@ -230,10 +231,10 @@ class CustomPatternToolTest(unittest.TestCase):
             upserted = server.upsert_clean_code_pattern(
                 sample_pattern(),
                 custom_patterns_path=path,
-                sync_weaviate=False,
+                sync_index=False,
             )
             self.assertTrue(upserted["created"])
-            self.assertFalse(upserted["synced_weaviate"])
+            self.assertFalse(upserted["synced_index"])
 
             listed = server.list_custom_clean_code_patterns(custom_patterns_path=path)
             self.assertEqual(listed["count"], 1)
@@ -241,11 +242,11 @@ class CustomPatternToolTest(unittest.TestCase):
             deleted = server.delete_custom_clean_code_pattern(
                 "CUSTOM-001",
                 custom_patterns_path=path,
-                sync_weaviate=False,
+                sync_index=False,
             )
             self.assertTrue(deleted["deleted"])
 
-    def test_server_write_tools_sync_weaviate_after_validation(self) -> None:
+    def test_server_write_tools_sync_index_after_validation(self) -> None:
         from mcp_server import server
 
         calls: list[tuple[str, str]] = []
@@ -268,12 +269,12 @@ class CustomPatternToolTest(unittest.TestCase):
                     server.upsert_clean_code_pattern(
                         sample_pattern(),
                         custom_patterns_path=path,
-                        sync_weaviate=True,
+                        sync_index=True,
                     )
                     server.delete_custom_clean_code_pattern(
                         "CUSTOM-001",
                         custom_patterns_path=path,
-                        sync_weaviate=True,
+                        sync_index=True,
                     )
         finally:
             server.semantic.upsert_chunk = original_upsert
@@ -322,8 +323,8 @@ class CustomPatternToolTest(unittest.TestCase):
         server.search_pattern_records = fake_search_patterns
         server.get_pattern_record = fake_get_pattern
         try:
-            self.assertEqual(server.clean_code_weaviate_schema()["class"], "CleanCodeChunks")
-            self.assertEqual(json.loads(server.weaviate_schema())["class"], "CleanCodeChunks")
+            self.assertEqual(server.clean_code_index_info()["backend"], "sqlite-vec")
+            self.assertEqual(json.loads(server.index_info_resource())["backend"], "sqlite-vec")
             pattern_resource = json.loads(server.clean_code_pattern_resource("CC-043"))
             self.assertEqual(pattern_resource["id"], "CC-043")
             self.assertEqual(server.search_clean_code("flag")[0]["chunk_id"], "x")
@@ -335,6 +336,10 @@ class CustomPatternToolTest(unittest.TestCase):
                 server.search_clean_code(" ")
             with self.assertRaises(ValueError):
                 server.search_clean_code("flag", limit=0)
+            with tempfile.TemporaryDirectory() as raw_tmp:
+                unsafe_index = str(Path(raw_tmp) / "outside.sqlite")
+                with self.assertRaises(ValidationError):
+                    server.search_clean_code("flag", index_path=unsafe_index)
             with self.assertRaises(ValueError):
                 server.search_clean_code_patterns(" ")
             with self.assertRaises(ValueError):
@@ -350,7 +355,7 @@ class CustomPatternToolTest(unittest.TestCase):
             no_match = server.recommend_clean_code_lint_rules("flag", language="typescript")
             self.assertTrue(no_match["no_strong_match"])
             with self.assertRaises(ValidationError):
-                server.upsert_clean_code_pattern(sample_pattern("CC-999"), sync_weaviate=False)
+                server.upsert_clean_code_pattern(sample_pattern("CC-999"), sync_index=False)
         finally:
             server.search_chunks = original_search_chunks
             server.search_pattern_records = original_search_patterns
@@ -363,10 +368,10 @@ class CustomPatternToolTest(unittest.TestCase):
         original_delete = server.semantic.delete_chunk
 
         def failing_upsert_chunk(**_: Any) -> None:
-            raise RuntimeError("weaviate unavailable")
+            raise RuntimeError("index unavailable")
 
         def failing_delete_chunk(**_: Any) -> bool:
-            raise RuntimeError("weaviate unavailable")
+            raise RuntimeError("index unavailable")
 
         try:
             with tempfile.TemporaryDirectory() as raw_tmp:
@@ -377,7 +382,7 @@ class CustomPatternToolTest(unittest.TestCase):
                         server.upsert_clean_code_pattern(
                             sample_pattern(),
                             custom_patterns_path=path,
-                            sync_weaviate=True,
+                            sync_index=True,
                         )
                     self.assertFalse(Path(path).exists())
 
@@ -385,14 +390,14 @@ class CustomPatternToolTest(unittest.TestCase):
                     server.upsert_clean_code_pattern(
                         sample_pattern(),
                         custom_patterns_path=path,
-                        sync_weaviate=False,
+                        sync_index=False,
                     )
                     server.semantic.delete_chunk = failing_delete_chunk
                     with self.assertRaises(RuntimeError):
                         server.delete_custom_clean_code_pattern(
                             "CUSTOM-001",
                             custom_patterns_path=path,
-                            sync_weaviate=True,
+                            sync_index=True,
                         )
                     self.assertEqual(
                         custom_patterns.list_custom_pattern_records(path)[0]["id"],
@@ -424,7 +429,7 @@ class CustomPatternToolTest(unittest.TestCase):
                         server.upsert_clean_code_pattern(
                             sample_pattern(),
                             custom_patterns_path=str(Path(raw_tmp) / "custom-patterns.jsonl"),
-                            sync_weaviate=True,
+                            sync_index=True,
                         )
         finally:
             custom_patterns.write_text_atomic = original_write
@@ -459,7 +464,7 @@ class CustomPatternToolTest(unittest.TestCase):
             server.upsert_clean_code_pattern(
                 sample_pattern(),
                 custom_patterns_path=path,
-                sync_weaviate=False,
+                sync_index=False,
             )
             pattern = server.get_clean_code_pattern(
                 "CUSTOM-001",
@@ -500,61 +505,36 @@ class CustomPatternToolTest(unittest.TestCase):
         )
 
 
-class WeaviateWriteTest(unittest.TestCase):
-    def test_upsert_delete_ingest_reset_and_search_use_http_contracts(self) -> None:
+class SqliteVecStoreTest(unittest.TestCase):
+    def test_upsert_delete_ingest_reset_and_search_use_sqlite_index(self) -> None:
         chunk = custom_patterns.custom_pattern_chunk(
             CustomCleanCodePattern.model_validate(sample_pattern())
         )
-        fake_httpx = FakeHttpx()
-        original_require_httpx = weaviate.require_httpx
-        original_embed_texts = weaviate.embed_texts
-        weaviate.require_httpx = lambda: fake_httpx
-        weaviate.embed_texts = lambda texts, **_: [[0.1, 0.2] for _text in texts]
+        original_embed_texts = sqlite_vec_store.embed_texts
+        sqlite_vec_store.embed_texts = lambda texts, **_: [
+            [float(index + 1)] * 384 for index, _text in enumerate(texts)
+        ]
         try:
-            weaviate.reset_collection(url="http://weaviate", collection_name="CleanCodeChunks")
-            self.assertIn(("get", "http://weaviate/v1/schema/CleanCodeChunks"), fake_httpx.calls)
-            self.assertIn(("post", "http://weaviate/v1/schema"), fake_httpx.calls)
+            with tempfile.TemporaryDirectory() as raw_tmp:
+                index_path = str(Path(raw_tmp) / "clean-code.sqlite")
+                sqlite_vec_store.reset_index(index_path=index_path)
+                self.assertEqual(sqlite_vec_store.ingest_chunks(chunks=[], index_path=index_path), 0)
+                inserted = sqlite_vec_store.ingest_chunks(chunks=[chunk], index_path=index_path)
+                self.assertEqual(inserted, 1)
 
-            fake_httpx.get_status = 200
-            weaviate.reset_collection(url="http://weaviate", collection_name="CleanCodeChunks")
-            self.assertIn(
-                ("delete", "http://weaviate/v1/schema/CleanCodeChunks"),
-                fake_httpx.calls,
-            )
+                sqlite_vec_store.upsert_chunk(chunk=chunk, index_path=index_path)
+                rows = sqlite_vec_store.search_chunks(query="flag", index_path=index_path, limit=1)
+                self.assertEqual(rows[0]["chunkId"], "custom-pattern:CUSTOM-001")
+                self.assertEqual(rows[0]["_additional"]["id"], chunk.object_id)
 
-            inserted = weaviate.ingest_chunks(chunks=[chunk], url="http://weaviate")
-            self.assertEqual(inserted, 1)
-            self.assertIn(("post", "http://weaviate/v1/batch/objects"), fake_httpx.calls)
+                self.assertTrue(sqlite_vec_store.delete_chunk(chunk=chunk, index_path=index_path))
+                self.assertFalse(sqlite_vec_store.delete_chunk(chunk=chunk, index_path=index_path))
 
-            weaviate.upsert_chunk(chunk=chunk, url="http://weaviate")
-            self.assertIn(
-                ("put", f"http://weaviate/v1/objects/CleanCodeChunks/{chunk.object_id}"),
-                fake_httpx.calls,
-            )
-
-            self.assertTrue(weaviate.delete_chunk(chunk=chunk, url="http://weaviate"))
-            fake_httpx.delete_status = weaviate.HTTP_NOT_FOUND
-            self.assertFalse(weaviate.delete_chunk(chunk=chunk, url="http://weaviate"))
-
-            rows = weaviate.search_chunks(query="flag", url="http://weaviate", limit=1)
-            self.assertEqual(rows, [{"chunkId": "custom-pattern:CUSTOM-001"}])
-            fake_httpx.batch_payload = [{"result": {"status": "FAILED"}}]
-            with self.assertRaises(RuntimeError):
-                weaviate.ingest_chunks(chunks=[chunk], url="http://weaviate")
-            with self.assertRaises(ValueError):
-                weaviate.build_search_graphql_query(
-                    collection_name="bad-name",
-                    vector=[0.1],
-                    limit=1,
-                )
-            with self.assertRaises(RuntimeError):
-                weaviate.search_rows_from_payload(
-                    {"errors": [{"message": "bad"}]},
-                    collection_name="X",
-                )
+                info = sqlite_vec_store.create_index_info(index_path=index_path)
+                self.assertEqual(info["backend"], "sqlite-vec")
+                self.assertEqual(info["schema_version"], sqlite_vec_store.INDEX_SCHEMA_VERSION)
         finally:
-            weaviate.require_httpx = original_require_httpx
-            weaviate.embed_texts = original_embed_texts
+            sqlite_vec_store.embed_texts = original_embed_texts
 
     def test_embed_texts_uses_fastembed_adapter(self) -> None:
         original_fastembed = sys.modules.get("fastembed")
@@ -569,7 +549,7 @@ class WeaviateWriteTest(unittest.TestCase):
         sys.modules["fastembed"] = types.SimpleNamespace(TextEmbedding=FakeEmbedding)
         try:
             self.assertEqual(
-                weaviate.embed_texts(["abc"], model_name="fake", batch_size=7),
+                sqlite_vec_store.embed_texts(["abc"], model_name="fake", batch_size=7),
                 [[3.0, 7.0]],
             )
         finally:
@@ -578,79 +558,72 @@ class WeaviateWriteTest(unittest.TestCase):
             else:
                 sys.modules["fastembed"] = original_fastembed
 
+    def test_search_requires_existing_index_without_creating_file(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            index_path = Path(raw_tmp) / "missing.sqlite"
+            with self.assertRaises(ValueError):
+                sqlite_vec_store.search_chunks(
+                    query="flag",
+                    index_path=str(index_path),
+                    limit=1,
+                )
+            self.assertFalse(index_path.exists())
 
-class FakeResponse:
-    def __init__(self, payload: Any | None = None, status_code: int = 200) -> None:
-        self._payload = payload if payload is not None else {}
-        self.status_code = status_code
+    def test_existing_index_rejects_mismatched_embedding_dimensions(self) -> None:
+        chunk = custom_patterns.custom_pattern_chunk(
+            CustomCleanCodePattern.model_validate(sample_pattern())
+        )
+        original_embed_texts = sqlite_vec_store.embed_texts
+        try:
+            with tempfile.TemporaryDirectory() as raw_tmp:
+                index_path = str(Path(raw_tmp) / "clean-code.sqlite")
+                sqlite_vec_store.embed_texts = lambda texts, **_: [
+                    [float(index + 1)] * 3 for index, _text in enumerate(texts)
+                ]
+                sqlite_vec_store.ingest_chunks(chunks=[chunk], index_path=index_path)
 
-    def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
+                sqlite_vec_store.embed_texts = lambda texts, **_: [
+                    [float(index + 1)] * 2 for index, _text in enumerate(texts)
+                ]
+                with self.assertRaises(ValueError):
+                    sqlite_vec_store.search_chunks(query="flag", index_path=index_path, limit=1)
+                with self.assertRaises(ValueError):
+                    sqlite_vec_store.upsert_chunk(chunk=chunk, index_path=index_path)
+        finally:
+            sqlite_vec_store.embed_texts = original_embed_texts
 
-    def json(self) -> Any:
-        return self._payload
+    def test_index_helpers_handle_existing_missing_and_malformed_metadata(self) -> None:
+        original_build_chunks = sqlite_vec_store.build_chunks
+        original_ingest_chunks = sqlite_vec_store.ingest_chunks
+        calls: list[str] = []
 
+        def fake_ingest_chunks(**_: Any) -> int:
+            calls.append("ingest")
+            return 0
 
-class FakeClient:
-    def __init__(self, owner: FakeHttpx, timeout: int) -> None:
-        self.owner = owner
-        self.timeout = timeout
+        sqlite_vec_store.build_chunks = lambda: []
+        sqlite_vec_store.ingest_chunks = fake_ingest_chunks
+        try:
+            with tempfile.TemporaryDirectory() as raw_tmp:
+                tmp = Path(raw_tmp)
+                missing_index = tmp / "missing.sqlite"
+                sqlite_vec_store.ensure_index(index_path=str(missing_index))
+                self.assertEqual(calls, ["ingest"])
 
-    def __enter__(self) -> FakeClient:
-        return self
+                malformed_index = tmp / "malformed.sqlite"
+                malformed_index.write_text("not sqlite")
+                self.assertFalse(sqlite_vec_store.index_has_chunks(malformed_index))
+                self.assertIsNone(sqlite_vec_store.stored_vector_dimensions(str(malformed_index)))
 
-    def __exit__(self, *_: object) -> None:
-        return None
-
-    def get(self, url: str) -> FakeResponse:
-        self.owner.calls.append(("get", url))
-        return FakeResponse(status_code=self.owner.get_status)
-
-    def delete(self, url: str) -> FakeResponse:
-        self.owner.calls.append(("delete", url))
-        return FakeResponse(status_code=self.owner.delete_status)
-
-    def post(self, url: str, *, json: Any) -> FakeResponse:
-        self.owner.calls.append(("post", url))
-        if url.endswith("/v1/batch/objects"):
-            return FakeResponse(self.owner.batch_payload)
-        return FakeResponse({"ok": True})
-
-
-class FakeHttpx:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str]] = []
-        self.batch_payload: list[dict[str, object]] = [{"result": {"status": "SUCCESS"}}]
-        self.delete_status = 200
-        self.get_status = weaviate.HTTP_NOT_FOUND
-
-    def Client(self, *, timeout: int) -> FakeClient:
-        return FakeClient(self, timeout)
-
-    def put(self, url: str, *, json: Any, timeout: int) -> FakeResponse:
-        self.calls.append(("put", url))
-        return FakeResponse({"ok": True})
-
-    def delete(self, url: str, *, timeout: int) -> FakeResponse:
-        self.calls.append(("delete", url))
-        return FakeResponse(status_code=self.delete_status)
-
-    def post(self, url: str, *, json: Any, timeout: int) -> FakeResponse:
-        self.calls.append(("post", url))
-        if url.endswith("/v1/graphql"):
-            return FakeResponse(
-                {
-                    "data": {
-                        "Get": {
-                            "CleanCodeChunks": [
-                                {"chunkId": "custom-pattern:CUSTOM-001"},
-                            ]
-                        }
-                    }
-                }
-            )
-        return FakeResponse({"ok": True})
+                no_metadata = tmp / "no-metadata.sqlite"
+                with sqlite3.connect(no_metadata) as connection:
+                    connection.execute(
+                        "create table index_metadata(key text primary key, value text not null)"
+                    )
+                self.assertIsNone(sqlite_vec_store.stored_vector_dimensions(str(no_metadata)))
+        finally:
+            sqlite_vec_store.build_chunks = original_build_chunks
+            sqlite_vec_store.ingest_chunks = original_ingest_chunks
 
 
 if __name__ == "__main__":

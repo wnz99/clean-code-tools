@@ -13,6 +13,11 @@ from mcp_server.custom_pattern_tools import (
     validate_clean_code_pattern_payload,
 )
 from mcp_server.pattern_lookup import pattern_by_id
+from mcp_server.pattern_models import (
+    RecommendCleanCodeLintRulesRequest,
+    SearchCleanCodePatternsRequest,
+    SearchCleanCodeRequest,
+)
 from mcp_server.server_payloads import (
     default_lint_targets,
     facet_counts,
@@ -20,12 +25,10 @@ from mcp_server.server_payloads import (
     search_result,
 )
 
-MAX_SEARCH_LIMIT = 25
-COLLECTION_NAME = semantic.COLLECTION_NAME
 DEFAULT_EMBEDDING_MODEL = semantic.DEFAULT_EMBEDDING_MODEL
-DEFAULT_WEAVIATE_URL = semantic.DEFAULT_WEAVIATE_URL
+DEFAULT_INDEX_PATH = semantic.DEFAULT_INDEX_PATH
 build_chunks = semantic.build_chunks
-create_schema_payload = semantic.create_schema_payload
+create_index_info = semantic.create_index_info
 get_pattern_record = semantic.get_pattern_record
 search_pattern_records = semantic.search_pattern_records
 search_chunks = semantic.search_chunks
@@ -54,18 +57,18 @@ def corpus_summary() -> str:
         {
             "chunks": len(chunks),
             "by_kind": by_kind,
-            "default_collection": COLLECTION_NAME,
+            "default_index_path": DEFAULT_INDEX_PATH,
             "default_embedding_model": DEFAULT_EMBEDDING_MODEL,
         },
         sort_keys=True,
     )
 
 
-@mcp.resource("clean-code://weaviate/schema")
-def weaviate_schema() -> str:
-    """Return the Weaviate schema payload used by the ingest script."""
+@mcp.resource("clean-code://index/info")
+def index_info_resource() -> str:
+    """Return the local sqlite-vec index metadata used by search."""
 
-    return json.dumps(create_schema_payload(), sort_keys=True, indent=2)
+    return json.dumps(create_index_info(), sort_keys=True, indent=2)
 
 
 @mcp.resource("clean-code://patterns/{pattern_id}")
@@ -83,36 +86,34 @@ def clean_code_corpus_summary() -> dict[str, Any]:
 
 
 @mcp.tool
-def clean_code_weaviate_schema() -> dict[str, Any]:
-    """Return the Weaviate collection schema used for clean-code search."""
+def clean_code_index_info() -> dict[str, Any]:
+    """Return local sqlite-vec index metadata used for clean-code search."""
 
-    return create_schema_payload()
+    return create_index_info()
 
 
 @mcp.tool
 def search_clean_code(
     query: str,
     limit: int = 8,
-    weaviate_url: str = DEFAULT_WEAVIATE_URL,
-    collection: str = COLLECTION_NAME,
+    index_path: str = DEFAULT_INDEX_PATH,
     model: str = DEFAULT_EMBEDDING_MODEL,
 ) -> list[dict[str, Any]]:
-    """Search the local Weaviate clean-code collection.
+    """Search the local sqlite-vec clean-code index."""
 
-    Requires a running Weaviate instance populated with
-    `scripts/weaviate_ingest_clean_code.py --reset`.
-    """
-
-    if not query.strip():
-        raise ValueError("query must not be empty")
-    if limit < 1 or limit > MAX_SEARCH_LIMIT:
-        raise ValueError("limit must be between 1 and 25")
+    request = SearchCleanCodeRequest.model_validate(
+        {
+            "query": query,
+            "limit": limit,
+            "index_path": index_path,
+            "model": model,
+        }
+    )
     rows = search_chunks(
-        query=query,
-        url=weaviate_url,
-        collection_name=collection,
-        model_name=model,
-        limit=limit,
+        query=request.query,
+        index_path=request.index_path or DEFAULT_INDEX_PATH,
+        model_name=request.model,
+        limit=request.limit,
     )
     return [search_result(row) for row in rows]
 
@@ -127,27 +128,34 @@ def search_clean_code_patterns(
     topics: list[str] | None = None,
     lintability: list[str] | None = None,
     source_kinds: list[str] | None = None,
-    weaviate_url: str = DEFAULT_WEAVIATE_URL,
-    collection: str = COLLECTION_NAME,
+    index_path: str = DEFAULT_INDEX_PATH,
     model: str = DEFAULT_EMBEDDING_MODEL,
 ) -> dict[str, Any]:
     """Find canonical clean-code patterns relevant to a concrete code concern."""
 
-    if not query.strip():
-        raise ValueError("query must not be empty")
-    if limit < 1 or limit > MAX_SEARCH_LIMIT:
-        raise ValueError("limit must be between 1 and 25")
+    request = SearchCleanCodePatternsRequest.model_validate(
+        {
+            "query": query,
+            "language": language,
+            "limit": limit,
+            "index_path": index_path,
+            "model": model,
+            "rule_families": rule_families,
+            "source_kinds": source_kinds,
+            "lintability": lintability,
+            "topics": topics,
+        }
+    )
     return search_pattern_records(
-        query=query,
-        url=weaviate_url,
-        collection_name=collection,
-        model_name=model,
-        limit=limit,
-        language=language,
-        rule_families=tuple(rule_families or ()),
-        topics=tuple(topics or ()),
-        lintability=tuple(lintability or ()),
-        source_kinds=tuple(source_kinds or semantic.DEFAULT_PATTERN_SOURCE_KINDS),
+        query=request.query,
+        index_path=request.index_path or DEFAULT_INDEX_PATH,
+        model_name=request.model,
+        limit=request.limit,
+        language=request.language,
+        rule_families=tuple(request.rule_families or ()),
+        topics=tuple(request.topics or ()),
+        lintability=tuple(request.lintability or ()),
+        source_kinds=tuple(request.source_kinds or semantic.DEFAULT_PATTERN_SOURCE_KINDS),
     )
 
 
@@ -168,35 +176,43 @@ def recommend_clean_code_lint_rules(
     language: str = "any",
     targets: list[str] | None = None,
     limit: int = 8,
-    weaviate_url: str = DEFAULT_WEAVIATE_URL,
-    collection: str = COLLECTION_NAME,
+    index_path: str = DEFAULT_INDEX_PATH,
     model: str = DEFAULT_EMBEDDING_MODEL,
 ) -> dict[str, Any]:
     """Recommend lint-rule candidates for repeated clean-code concerns."""
 
-    search_payload = search_clean_code_patterns(
-        query=query,
-        limit=limit,
-        language=language,
-        lintability=["high", "medium"],
-        source_kinds=["clean_code_pattern"],
-        weaviate_url=weaviate_url,
-        collection=collection,
-        model=model,
-    )
-    requested_targets = targets or default_lint_targets(language)
-    if search_payload["no_strong_match"]:
-        return {
+    request = RecommendCleanCodeLintRulesRequest.model_validate(
+        {
             "query": query,
             "language": language,
+            "targets": targets,
+            "limit": limit,
+            "index_path": index_path,
+            "model": model,
+        }
+    )
+    search_payload = search_clean_code_patterns(
+        query=request.query,
+        limit=request.limit,
+        language=request.language,
+        lintability=["high", "medium"],
+        source_kinds=["clean_code_pattern"],
+        index_path=request.index_path or DEFAULT_INDEX_PATH,
+        model=request.model,
+    )
+    requested_targets = request.targets or default_lint_targets(request.language)
+    if search_payload["no_strong_match"]:
+        return {
+            "query": request.query,
+            "language": request.language,
             "targets": requested_targets,
             "results": [],
             "no_strong_match": True,
             "no_recommendation": "No high-confidence lint-rule candidate matched this query.",
         }
     return {
-        "query": query,
-        "language": language,
+        "query": request.query,
+        "language": request.language,
         "targets": requested_targets,
         "results": [lint_rule_recommendation(result, requested_targets) for result in search_payload["results"]],
         "no_strong_match": search_payload["no_strong_match"],
@@ -228,18 +244,16 @@ def upsert_clean_code_pattern(
     pattern: dict[str, Any],
     custom_patterns_path: str | None = None,
     *,
-    sync_weaviate: bool = True,
-    weaviate_url: str = DEFAULT_WEAVIATE_URL,
-    collection: str = COLLECTION_NAME,
+    sync_index: bool = True,
+    index_path: str = DEFAULT_INDEX_PATH,
     model: str = DEFAULT_EMBEDDING_MODEL,
 ) -> dict[str, Any]:
     return upsert_clean_code_pattern_payload(
         {
             "pattern": pattern,
             "custom_patterns_path": custom_patterns_path,
-            "sync_weaviate": sync_weaviate,
-            "weaviate_url": weaviate_url,
-            "collection": collection,
+            "sync_index": sync_index,
+            "index_path": index_path,
             "model": model,
         }
     )
@@ -250,16 +264,14 @@ def delete_custom_clean_code_pattern(
     pattern_id: str,
     custom_patterns_path: str | None = None,
     *,
-    sync_weaviate: bool = True,
-    weaviate_url: str = DEFAULT_WEAVIATE_URL,
-    collection: str = COLLECTION_NAME,
+    sync_index: bool = True,
+    index_path: str = DEFAULT_INDEX_PATH,
 ) -> dict[str, Any]:
     return delete_custom_clean_code_pattern_payload(
         pattern_id,
         custom_patterns_path,
-        sync_weaviate=sync_weaviate,
-        weaviate_url=weaviate_url,
-        collection=collection,
+        sync_index=sync_index,
+        index_path=index_path,
     )
 
 

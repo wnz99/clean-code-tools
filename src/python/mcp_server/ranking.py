@@ -9,11 +9,11 @@ from mcp_server.ranking_scoring import (
     row_matches_filters,
     score_pattern_row,
 )
+from mcp_server.sqlite_vec_store import DEFAULT_INDEX_PATH, search_chunks
 from mcp_server.text import (
     lexical_score,
     query_tokens,
 )
-from mcp_server.weaviate import COLLECTION_NAME, search_chunks
 
 DEFAULT_PATTERN_SOURCE_KINDS = ("clean_code_pattern", "custom_clean_code_pattern")
 
@@ -21,8 +21,7 @@ DEFAULT_PATTERN_SOURCE_KINDS = ("clean_code_pattern", "custom_clean_code_pattern
 def search_pattern_records(  # noqa: PLR0913  # pylint: disable=too-many-arguments,too-many-locals
     *,
     query: str,
-    url: str,
-    collection_name: str = COLLECTION_NAME,
+    index_path: str = DEFAULT_INDEX_PATH,
     model_name: str = DEFAULT_EMBEDDING_MODEL,
     limit: int = 8,
     language: str = "any",
@@ -34,8 +33,7 @@ def search_pattern_records(  # noqa: PLR0913  # pylint: disable=too-many-argumen
     vector_limit = max(limit * 4, 25)
     vector_rows = search_chunks(
         query=query,
-        url=url,
-        collection_name=collection_name,
+        index_path=index_path,
         model_name=model_name,
         limit=vector_limit,
     )

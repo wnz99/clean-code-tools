@@ -39,7 +39,7 @@ lint = [
 mcp = [
   "fastembed>=0.8.0",
   "fastmcp>=2.0.0",
-  "httpx>=0.27.0",
+  "sqlite-vec>=0.1.9",
 ]
 typecheck = [
   "pyright>=1.1.403",
@@ -231,21 +231,6 @@ split-on-trailing-comma = true
   "S607",
   "T201",
 ]
-"skills/clean-code-mcp-reviewer/runtime/scripts/docker_init_weaviate.py" = [
-  "S603",
-  "T201",
-  "TRY003",
-]
-"skills/clean-code-mcp-reviewer/runtime/scripts/docker_mcp_server.py" = [
-  "S104",
-  "S603",
-]
-"scripts/weaviate_ingest_clean_code.py" = [
-  "TRY003",
-]
-"scripts/weaviate_search_clean_code.py" = [
-  "TRY003",
-]
 "src/python/mcp_server/server.py" = [
   "PLC0415",
   "PLR0913",
@@ -283,7 +268,8 @@ DEP002 = [
 DEP004 = [
   "fastembed",
   "fastmcp",
-  "httpx",
+  "sqlite_vec",
+  "sqlite-vec",
 ]
 
 [tool.pylint.main]

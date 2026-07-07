@@ -7,11 +7,11 @@ from _mcp_app import load_semantic_module
 
 semantic = load_semantic_module()
 search_chunks = semantic.search_chunks
+LIMIT_ERROR = "--limit must be at least 1"
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--url", default=semantic.DEFAULT_WEAVIATE_URL)
-    parser.add_argument("--collection", default=semantic.COLLECTION_NAME)
+    parser.add_argument("--index-path", default=semantic.DEFAULT_INDEX_PATH)
     parser.add_argument("--model", default=semantic.DEFAULT_EMBEDDING_MODEL)
 
 
@@ -29,18 +29,17 @@ def print_search_results(results: list[dict[str, object]]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Search clean-code semantic chunks in Weaviate.")
+    parser = argparse.ArgumentParser(description="Search clean-code chunks in the sqlite-vec index.")
     add_common_args(parser)
     parser.add_argument("query")
     parser.add_argument("--limit", type=int, default=8)
     args = parser.parse_args()
 
     if args.limit < 1:
-        raise SystemExit("--limit must be at least 1")
+        raise SystemExit(LIMIT_ERROR)
     results = search_chunks(
         query=args.query,
-        url=args.url,
-        collection_name=args.collection,
+        index_path=args.index_path,
         model_name=args.model,
         limit=args.limit,
     )

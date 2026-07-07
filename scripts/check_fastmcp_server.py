@@ -50,7 +50,7 @@ async def main() -> None:
         tool_names = {tool.name for tool in tools}
         assert {
             "clean_code_corpus_summary",
-            "clean_code_weaviate_schema",
+            "clean_code_index_info",
             "search_clean_code",
             "search_clean_code_patterns",
             "get_clean_code_pattern",
@@ -65,17 +65,17 @@ async def main() -> None:
         resources = await client.list_resources()
         resource_uris = {str(resource.uri) for resource in resources}
         assert "clean-code://corpus/summary" in resource_uris
-        assert "clean-code://weaviate/schema" in resource_uris
+        assert "clean-code://index/info" in resource_uris
 
         summary = await client.call_tool("clean_code_corpus_summary", {})
         summary_data = summary.data
         assert summary_data["chunks"] >= 300
         assert summary_data["by_kind"]["pattern_record"] == 264
 
-        schema = await client.call_tool("clean_code_weaviate_schema", {})
-        schema_data = schema.data
-        assert schema_data["class"] == "CleanCodeChunks"
-        assert schema_data["vectorConfig"]["content"]["vectorizer"] == {"none": {}}
+        index_info = await client.call_tool("clean_code_index_info", {})
+        index_data = index_info.data
+        assert index_data["backend"] == "sqlite-vec"
+        assert index_data["tables"]["vec_chunks"]["columns"] == ["chunk_id", "embedding"]
 
         pattern = await client.call_tool("get_clean_code_pattern", {"pattern_id": "CC-043"})
         pattern_data = pattern.data
