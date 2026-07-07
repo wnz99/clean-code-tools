@@ -16,6 +16,7 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 PYTHON_TEMPLATE = SKILL_ROOT / "templates" / "python.clean-code.pyproject.toml"
 KNIP_CONFIG_NAME = "knip.json"
 FALLOW_CONFIG_NAME = ".fallowrc.json"
+FALLOW_CONFIG_NAMES = (FALLOW_CONFIG_NAME, ".fallowrc.jsonc")
 MCP_RUNTIME_FILES = (
     SKILL_ROOT / "runtime",
 )
@@ -355,6 +356,14 @@ def eslint_config(repo: Path) -> Path | None:
     return None
 
 
+def fallow_config(repo: Path) -> Path | None:
+    for name in FALLOW_CONFIG_NAMES:
+        path = repo / name
+        if path.exists():
+            return path
+    return None
+
+
 def plan_js(repo: Path, plan: Plan) -> None:
     package_manager = detect_js_package_manager(repo)
     if package_manager is None:
@@ -402,11 +411,19 @@ def plan_js(repo: Path, plan: Plan) -> None:
                 "Configure Knip to check JS/TS unused files, exports, binaries, and dependencies.",
             )
         )
-    if not (repo / FALLOW_CONFIG_NAME).exists():
+    existing_fallow_config = fallow_config(repo)
+    if existing_fallow_config is None:
         plan.changes.append(
             Change(
                 f"create {FALLOW_CONFIG_NAME}",
                 "Configure Fallow dead-code and duplication checks with common generated/vendor ignores.",
+            )
+        )
+    elif existing_fallow_config.name != FALLOW_CONFIG_NAME:
+        plan.changes.append(
+            Change(
+                "fallow already configured",
+                f"{existing_fallow_config.name} already exists; not creating {FALLOW_CONFIG_NAME}.",
             )
         )
 
@@ -759,9 +776,9 @@ def apply_js_quality_config(repo: Path) -> None:
     if not knip_config.exists():
         knip_config.write_text(json.dumps(KNIP_CONFIG, indent=2) + "\n")
 
-    fallow_config = repo / FALLOW_CONFIG_NAME
-    if not fallow_config.exists():
-        fallow_config.write_text(json.dumps(FALLOW_CONFIG, indent=2) + "\n")
+    existing_fallow_config = fallow_config(repo)
+    if existing_fallow_config is None:
+        (repo / FALLOW_CONFIG_NAME).write_text(json.dumps(FALLOW_CONFIG, indent=2) + "\n")
 
     package_json_path = repo / "package.json"
     payload = package_json(repo)
