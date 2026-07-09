@@ -144,6 +144,21 @@ class CleanCodeInstallerTest(unittest.TestCase):
                 installer.plan_js(repo, plan)
             self.assertTrue(any("not installed" in blocker for blocker in plan.blockers))
 
+    def test_plan_js_respects_existing_fallow_jsonc_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp).resolve()
+            (repo / "package.json").write_text(json.dumps({"scripts": {"lint": "eslint ."}}))
+            (repo / "package-lock.json").write_text("{}\n")
+            (repo / ".fallowrc.jsonc").write_text('{\n  // project-specific fallow config\n  "ignorePatterns": []\n}\n')
+
+            with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/npm"):
+                plan = installer.Plan(repo=repo, git_root=repo)
+                installer.plan_js(repo, plan)
+
+            labels = [change.label for change in plan.changes]
+            self.assertIn("fallow already configured", labels)
+            self.assertNotIn(f"create {installer.FALLOW_CONFIG_NAME}", labels)
+
     def test_plan_python_config_shapes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp).resolve()
@@ -235,7 +250,10 @@ class CleanCodeInstallerTest(unittest.TestCase):
 
             installer.apply_git_hooks(repo, choice="none", mode="advisory")
             installer.apply_git_hooks(repo, choice="pre-push", mode="blocking")
-            self.assertIn("--mode", (hooks_dir / "pre-push").read_text())
+            pre_push_text = (hooks_dir / "pre-push").read_text()
+            self.assertIn("--mode", pre_push_text)
+            self.assertIn("--changed-since", pre_push_text)
+            self.assertNotIn("--changed-since", installer.hook_wrapper("pre-commit", mode="advisory"))
             self.assertTrue((hooks_dir / installer.HOOK_SCRIPT_NAME).exists())
 
     def test_apply_config_helpers_write_expected_files(self) -> None:
@@ -258,6 +276,13 @@ class CleanCodeInstallerTest(unittest.TestCase):
             no_package.mkdir()
             installer.apply_js_quality_config(no_package)
             self.assertTrue((no_package / installer.KNIP_CONFIG_NAME).exists())
+
+            jsonc_repo = repo / "jsonc-fallow"
+            jsonc_repo.mkdir()
+            (jsonc_repo / ".fallowrc.jsonc").write_text('{"ignorePatterns": []}\n')
+            installer.apply_js_quality_config(jsonc_repo)
+            self.assertTrue((jsonc_repo / ".fallowrc.jsonc").exists())
+            self.assertFalse((jsonc_repo / installer.FALLOW_CONFIG_NAME).exists())
 
             installer.apply_python(no_package)
             self.assertTrue((no_package / "pyproject.toml").exists())
