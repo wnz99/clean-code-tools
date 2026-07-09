@@ -245,6 +245,15 @@ The hook runs ESLint and Ruff by default. Pylint is intentionally skipped by
 default to keep pushes responsive; enable deeper Python hook feedback with
 `CLEAN_CODE_AGENT_HOOK_PYLINT=1 git push`.
 
+On `pre-push`, the hook checks only files changed from
+`CLEAN_CODE_AGENT_CHANGED_SINCE`, defaulting to `origin/develop`. It passes
+changed JavaScript/TypeScript files to ESLint and changed Python files to Ruff
+or Pylint. Override the base for one push with:
+
+```bash
+CLEAN_CODE_AGENT_CHANGED_SINCE=origin/main git push
+```
+
 Hook output is a tripwire, not a final review result. When a hook prints
 candidate locations and suggested MCP queries, read the named files first, use
 this skill, query the MCP narrowly, and decide whether each candidate is a real

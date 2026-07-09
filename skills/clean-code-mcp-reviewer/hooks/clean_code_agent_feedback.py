@@ -17,6 +17,8 @@ CATALOG_CANDIDATES = (
     HOOK_DIR / CATALOG_NAME,
     HOOK_DIR.parent / "catalog" / CATALOG_NAME,
 )
+JAVASCRIPT_EXTENSIONS = frozenset({".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"})
+PYTHON_EXTENSIONS = frozenset({".py"})
 
 
 @dataclass(frozen=True)
@@ -100,23 +102,48 @@ def package_manager(repo: Path) -> str | None:
     return None
 
 
-def eslint_command(manager: str) -> list[str]:
+def changed_files(repo: Path, base_ref: str) -> list[str]:
+    completed = run(
+        ["git", "diff", "--name-only", "--diff-filter=ACMR", base_ref, "--"],
+        cwd=repo,
+        timeout=30,
+    )
+    if completed is None or completed.returncode != 0:
+        return []
+    return [
+        line.strip()
+        for line in completed.stdout.splitlines()
+        if line.strip() and (repo / line.strip()).exists()
+    ]
+
+
+def files_with_extensions(files: list[str] | None, extensions: frozenset[str]) -> list[str] | None:
+    if files is None:
+        return None
+    return [path for path in files if Path(path).suffix in extensions]
+
+
+def eslint_command(manager: str, files: list[str] | None = None) -> list[str]:
+    targets = files or ["."]
     if manager == "bun":
-        return ["bunx", "eslint", ".", "--format", "json"]
+        return ["bunx", "eslint", *targets, "--format", "json"]
     if manager == "pnpm":
-        return ["pnpm", "exec", "eslint", ".", "--format", "json"]
+        return ["pnpm", "exec", "eslint", *targets, "--format", "json"]
     if manager == "yarn":
-        return ["yarn", "eslint", ".", "--format", "json"]
-    return ["npx", "eslint", ".", "--format", "json"]
+        return ["yarn", "eslint", *targets, "--format", "json"]
+    return ["npx", "eslint", *targets, "--format", "json"]
 
 
-def eslint_findings(repo: Path, *, timeout: int) -> list[Finding]:
+def eslint_findings(repo: Path, *, timeout: int, files: list[str] | None = None) -> list[Finding]:
     if not (repo / "package.json").exists():
         return []
     manager = package_manager(repo)
     if manager is None:
         return []
-    completed = run(eslint_command(manager), cwd=repo, timeout=timeout)
+    target_files = files_with_extensions(files, JAVASCRIPT_EXTENSIONS)
+    if target_files == []:
+        return []
+    completed = run(eslint_command(manager, target_files), cwd=repo, timeout=timeout)
     if completed is None:
         return []
     payload = load_json(completed.stdout)
@@ -149,20 +176,24 @@ def eslint_findings(repo: Path, *, timeout: int) -> list[Finding]:
     return findings
 
 
-def python_command(repo: Path, tool: str) -> list[str]:
+def python_command(repo: Path, tool: str, files: list[str] | None = None) -> list[str]:
+    targets = files or ["."]
     if shutil.which("uv") and ((repo / "uv.lock").exists() or (repo / "pyproject.toml").exists()):
         if tool == "ruff":
-            return ["uv", "run", "ruff", "check", ".", "--output-format=json"]
-        return ["uv", "run", "pylint", ".", "--output-format=json"]
+            return ["uv", "run", "ruff", "check", *targets, "--output-format=json"]
+        return ["uv", "run", "pylint", *targets, "--output-format=json"]
     if tool == "ruff":
-        return [sys.executable, "-m", "ruff", "check", ".", "--output-format=json"]
-    return [sys.executable, "-m", "pylint", ".", "--output-format=json"]
+        return [sys.executable, "-m", "ruff", "check", *targets, "--output-format=json"]
+    return [sys.executable, "-m", "pylint", *targets, "--output-format=json"]
 
 
-def ruff_findings(repo: Path, *, timeout: int) -> list[Finding]:
+def ruff_findings(repo: Path, *, timeout: int, files: list[str] | None = None) -> list[Finding]:
     if not has_python(repo):
         return []
-    completed = run(python_command(repo, "ruff"), cwd=repo, timeout=timeout)
+    target_files = files_with_extensions(files, PYTHON_EXTENSIONS)
+    if target_files == []:
+        return []
+    completed = run(python_command(repo, "ruff", target_files), cwd=repo, timeout=timeout)
     if completed is None:
         return []
     payload = load_json(completed.stdout)
@@ -194,10 +225,13 @@ def ruff_findings(repo: Path, *, timeout: int) -> list[Finding]:
     return findings
 
 
-def pylint_findings(repo: Path, *, timeout: int) -> list[Finding]:
+def pylint_findings(repo: Path, *, timeout: int, files: list[str] | None = None) -> list[Finding]:
     if not has_python(repo):
         return []
-    completed = run(python_command(repo, "pylint"), cwd=repo, timeout=timeout)
+    target_files = files_with_extensions(files, PYTHON_EXTENSIONS)
+    if target_files == []:
+        return []
+    completed = run(python_command(repo, "pylint", target_files), cwd=repo, timeout=timeout)
     if completed is None:
         return []
     payload = load_json(completed.stdout)
@@ -275,15 +309,17 @@ def main() -> None:
     parser.add_argument("--mode", choices=("advisory", "blocking"), default=os.environ.get("CLEAN_CODE_AGENT_HOOK_MODE", "advisory"))
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument("--changed-since", help="Only inspect files changed from this Git ref.")
     args = parser.parse_args()
 
     repo = repo_root()
+    changed = changed_files(repo, args.changed_since) if args.changed_since else None
     findings = [
-        *eslint_findings(repo, timeout=args.timeout),
-        *ruff_findings(repo, timeout=args.timeout),
+        *eslint_findings(repo, timeout=args.timeout, files=changed),
+        *ruff_findings(repo, timeout=args.timeout, files=changed),
     ]
     if include_pylint():
-        findings.extend(pylint_findings(repo, timeout=args.timeout))
+        findings.extend(pylint_findings(repo, timeout=args.timeout, files=changed))
     print_feedback(findings, hook_name=args.hook, limit=args.limit, blocking=args.mode == "blocking")
     if findings and args.mode == "blocking":
         raise SystemExit(1)

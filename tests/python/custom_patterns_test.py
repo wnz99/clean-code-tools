@@ -601,7 +601,7 @@ class SqliteVecStoreTest(unittest.TestCase):
             calls.append("ingest")
             return 0
 
-        sqlite_vec_store.build_chunks = lambda: []
+        sqlite_vec_store.build_chunks = list
         sqlite_vec_store.ingest_chunks = fake_ingest_chunks
         try:
             with tempfile.TemporaryDirectory() as raw_tmp:

@@ -250,7 +250,10 @@ class CleanCodeInstallerTest(unittest.TestCase):
 
             installer.apply_git_hooks(repo, choice="none", mode="advisory")
             installer.apply_git_hooks(repo, choice="pre-push", mode="blocking")
-            self.assertIn("--mode", (hooks_dir / "pre-push").read_text())
+            pre_push_text = (hooks_dir / "pre-push").read_text()
+            self.assertIn("--mode", pre_push_text)
+            self.assertIn("--changed-since", pre_push_text)
+            self.assertNotIn("--changed-since", installer.hook_wrapper("pre-commit", mode="advisory"))
             self.assertTrue((hooks_dir / installer.HOOK_SCRIPT_NAME).exists())
 
     def test_apply_config_helpers_write_expected_files(self) -> None:

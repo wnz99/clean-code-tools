@@ -860,13 +860,16 @@ def apply_mcp_runtime(repo: Path) -> None:
 
 
 def hook_wrapper(hook_name: str, *, mode: str) -> str:
+    changed_since = ""
+    if hook_name == "pre-push":
+        changed_since = ' --changed-since "${CLEAN_CODE_AGENT_CHANGED_SINCE:-origin/develop}"'
     return f"""#!/bin/sh
 {HOOK_MARKER}
 HOOK_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 if [ "${{CLEAN_CODE_AGENT_HOOK:-1}}" = "0" ]; then
   exit 0
 fi
-exec python3 "$HOOK_DIR/{HOOK_SCRIPT_NAME}" --hook {hook_name} --mode "${{CLEAN_CODE_AGENT_HOOK_MODE:-{mode}}}"
+exec python3 "$HOOK_DIR/{HOOK_SCRIPT_NAME}" --hook {hook_name} --mode "${{CLEAN_CODE_AGENT_HOOK_MODE:-{mode}}}"{changed_since}
 """
 
 
