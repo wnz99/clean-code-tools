@@ -10,9 +10,9 @@ from mcp_server.models import CleanCodeChunk, JsonDict
 from mcp_server.pattern_chunks import PatternChunkSpec, pattern_chunk
 from mcp_server.pattern_models import CustomCleanCodePattern, clean_custom_patterns_path
 
-ROOT = Path(__file__).resolve().parents[3]
+RUNTIME_HOME = Path(__file__).resolve().parents[4]
 CUSTOM_PATTERNS_ENV_VAR = "CLEAN_CODE_CUSTOM_PATTERNS_PATH"
-DEFAULT_CUSTOM_PATTERN_RECORDS = ROOT / "data" / "custom-clean-code-patterns.jsonl"
+DEFAULT_CUSTOM_PATTERN_RECORDS = RUNTIME_HOME / "data" / "custom-clean-code-patterns.jsonl"
 CUSTOM_PATTERN_RECORDS = DEFAULT_CUSTOM_PATTERN_RECORDS
 
 

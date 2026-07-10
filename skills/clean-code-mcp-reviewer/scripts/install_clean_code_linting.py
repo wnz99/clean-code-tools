@@ -20,7 +20,13 @@ FALLOW_CONFIG_NAMES = (FALLOW_CONFIG_NAME, ".fallowrc.jsonc")
 MCP_RUNTIME_FILES = (
     SKILL_ROOT / "runtime",
 )
-MCP_RUNTIME_TARGET = ".clean-code-mcp"
+MCP_HOME_ENV = "CLEAN_CODE_TOOLS_HOME"
+MCP_HOME_NAME = ".clean-code-tools"
+MCP_RUNTIME_DIR_NAME = "runtime"
+MCP_VENV_DIR_NAME = ".venv"
+MCP_INDEX_NAME = "clean-code-index.sqlite"
+MCP_OWNERSHIP_MARKER = ".clean-code-tools-owned"
+MCP_OWNERSHIP_CONTENT = "managed by clean-code-tools\n"
 MCP_RUNTIME_PORT_ENV = "CLEAN_CODE_MCP_PORT"
 MAX_TCP_PORT = 65535
 MCP_RUNTIME_REQUIRED_MODULES = ("pydantic", "fastmcp", "fastembed", "sqlite_vec")
@@ -364,7 +370,7 @@ def fallow_config(repo: Path) -> Path | None:
     return None
 
 
-def plan_js(repo: Path, plan: Plan) -> None:
+def plan_js(repo: Path, plan: Plan) -> None:  # noqa: PLR0912
     package_manager = detect_js_package_manager(repo)
     if package_manager is None:
         return
@@ -587,35 +593,48 @@ def build_plan(
     return plan
 
 
-def plan_mcp_runtime(repo: Path, plan: Plan, *, start: bool) -> None:
-    target = repo / MCP_RUNTIME_TARGET
-    if target.exists():
-        plan.blockers.append(f"{MCP_RUNTIME_TARGET} already exists. Remove it or merge the runtime manually.")
-        return
+def plan_mcp_runtime(_repo: Path, plan: Plan, *, start: bool) -> None:
+    target = mcp_home()
     plan.changes.append(
         Change(
-            f"create {MCP_RUNTIME_TARGET}/",
-            "Copy the bundled Python MCP server runtime and clean-code corpus.",
+            f"install MCP runtime in {target}",
+            "Copy the bundled server, install isolated dependencies, and populate its SQLite index.",
         )
+    )
+    venv_python = mcp_venv_python(target)
+    plan.commands.extend(
+        [
+            PlannedCommand(
+                "create MCP virtual environment",
+                [sys.executable, "-m", "venv", str(target / MCP_VENV_DIR_NAME)],
+                "mcp-install",
+            ),
+            PlannedCommand(
+                "install MCP runtime dependencies",
+                [str(venv_python), "-m", "pip", "install", *MCP_RUNTIME_REQUIRED_PACKAGES],
+                "mcp-install",
+            ),
+            PlannedCommand(
+                "populate MCP search index",
+                [
+                    str(venv_python),
+                    str(target / MCP_RUNTIME_DIR_NAME / "scripts" / "sqlite_vec_ingest_clean_code.py"),
+                    "--index-path",
+                    str(target / MCP_INDEX_NAME),
+                ],
+                "mcp-install",
+                target,
+            ),
+        ]
     )
     if start:
         port = mcp_runtime_port(plan)
-        missing_modules = missing_runtime_modules()
-        if missing_modules:
-            install_hint = " ".join(MCP_RUNTIME_REQUIRED_PACKAGES)
-            plan.blockers.append(
-                "Cannot start the local MCP runtime because this Python cannot import "
-                f"{', '.join(missing_modules)}. Install runtime dependencies first with "
-                f"`{sys.executable} -m pip install {install_hint}`, or rerun without "
-                "--start-mcp-runtime."
-            )
-            return
         plan.commands.append(
             PlannedCommand(
                 "start local clean-code MCP runtime",
                 [
-                    sys.executable,
-                    f"{MCP_RUNTIME_TARGET}/runtime/scripts/clean_code_mcp_server.py",
+                    str(venv_python),
+                    str(target / MCP_RUNTIME_DIR_NAME / "scripts" / "clean_code_mcp_server.py"),
                     "--transport",
                     "http",
                     "--host",
@@ -624,8 +643,20 @@ def plan_mcp_runtime(repo: Path, plan: Plan, *, start: bool) -> None:
                     str(port),
                 ],
                 "mcp-runtime",
+                target,
             )
         )
+
+
+def mcp_home() -> Path:
+    configured = os.environ.get(MCP_HOME_ENV)
+    return Path(configured).expanduser().resolve() if configured else Path.home() / MCP_HOME_NAME
+
+
+def mcp_venv_python(home: Path) -> Path:
+    executable = "python.exe" if os.name == "nt" else "python"
+    scripts_dir = "Scripts" if os.name == "nt" else "bin"
+    return home / MCP_VENV_DIR_NAME / scripts_dir / executable
 
 
 def mcp_runtime_port(plan: Plan) -> int:
@@ -848,15 +879,56 @@ def has_commands(plan: Plan, category: str) -> bool:
 
 
 def apply_mcp_runtime(repo: Path) -> None:
-    target = repo / MCP_RUNTIME_TARGET
-    target.mkdir()
-    (target / "data").mkdir()
+    target = mcp_home()
+    ensure_safe_mcp_home(target, repo=repo)
+    target.mkdir(parents=True, exist_ok=True)
+    (target / MCP_OWNERSHIP_MARKER).write_text(MCP_OWNERSHIP_CONTENT)
     for source in MCP_RUNTIME_FILES:
-        destination = target / source.name
+        destination = target / MCP_RUNTIME_DIR_NAME
         if source.is_dir():
-            shutil.copytree(source, destination)
+            if destination.exists():
+                shutil.rmtree(destination)
+            shutil.copytree(source, destination, dirs_exist_ok=True)
         else:
             shutil.copy2(source, destination)
+
+
+def uninstall_mcp_runtime() -> None:
+    target = mcp_home()
+    if not target.exists():
+        return
+    unsafe_paths = {Path(target.anchor).resolve(), Path.home().resolve()}
+    marker = target / MCP_OWNERSHIP_MARKER
+    if (
+        target.resolve() in unsafe_paths
+        or not marker.is_file()
+        or marker.read_text() != MCP_OWNERSHIP_CONTENT
+    ):
+        raise SystemExit(
+            f"Refusing to remove {target}: it is not a safely identified clean-code-tools home."
+        )
+    shutil.rmtree(target)
+
+
+def ensure_safe_mcp_home(target: Path, *, repo: Path) -> None:
+    resolved_target = target.resolve()
+    resolved_repo = repo.resolve()
+    unsafe_paths = {Path(target.anchor).resolve(), Path.home().resolve()}
+    overlaps_repo = (
+        resolved_target == resolved_repo
+        or resolved_target in resolved_repo.parents
+        or resolved_repo in resolved_target.parents
+    )
+    if resolved_target in unsafe_paths or overlaps_repo:
+        raise SystemExit(f"Refusing to use unsafe clean-code-tools home: {target}")
+    if not target.exists():
+        return
+    marker = target / MCP_OWNERSHIP_MARKER
+    entries = list(target.iterdir())
+    if entries and (not marker.is_file() or marker.read_text() != MCP_OWNERSHIP_CONTENT):
+        raise SystemExit(
+            f"Refusing to claim nonempty unowned directory as clean-code-tools home: {target}"
+        )
 
 
 def hook_wrapper(hook_name: str, *, mode: str) -> str:
@@ -943,7 +1015,21 @@ def parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--no-backup", action="store_true", help="Do not create a Git rollback point before --apply.")
     parser.add_argument("--skip-install", action="store_true", help="Modify files without running package installers.")
-    parser.add_argument("--mcp-runtime", action="store_true", help=f"Also copy the local MCP runtime into {MCP_RUNTIME_TARGET}/.")
+    parser.add_argument(
+        "--no-mcp-runtime",
+        action="store_true",
+        help=f"Do not install the MCP runtime in ~/{MCP_HOME_NAME}; it is installed by default.",
+    )
+    parser.add_argument(
+        "--mcp-only",
+        action="store_true",
+        help="Install or refresh only the shared MCP runtime and populated index.",
+    )
+    parser.add_argument(
+        "--uninstall-mcp-runtime",
+        action="store_true",
+        help=f"Remove the shared MCP runtime, environment, index, and state from ~/{MCP_HOME_NAME}.",
+    )
     parser.add_argument(
         "--start-mcp-runtime",
         action="store_true",
@@ -987,16 +1073,17 @@ def apply_runtime_if_approved(
     wants_mcp_runtime: bool,
     assume_yes: bool,
     summary: ApplySummary,
-) -> None:
+) -> bool:
     if not wants_mcp_runtime:
         summary.mark_skipped("MCP runtime", "not requested")
-        return
-    if confirm(f"Create {MCP_RUNTIME_TARGET}/ local MCP runtime files", assume_yes=assume_yes):
+        return False
+    if confirm(f"Install the MCP runtime and populated index in {mcp_home()}", assume_yes=assume_yes):
         apply_mcp_runtime(repo)
-        summary.mark_applied(f"{MCP_RUNTIME_TARGET}/ runtime files")
-        return
+        summary.mark_applied(f"MCP files in {mcp_home()}")
+        return True
     summary.mark_skipped("MCP runtime", "approval declined or unavailable")
-    print(f"skipped: {MCP_RUNTIME_TARGET}/ was not created")
+    print(f"skipped: {mcp_home()} was not created")
+    return False
 
 
 def apply_hooks_if_approved(
@@ -1078,12 +1165,15 @@ def apply_requested_setup(plan: Plan, options: ApplyOptions) -> None:
     else:
         summary.mark_skipped("rollback point", "--no-backup was passed")
     apply_lint_config_if_approved(plan, assume_yes=options.assume_yes, summary=summary)
-    apply_runtime_if_approved(
+    runtime_applied = apply_runtime_if_approved(
         plan.repo,
         wants_mcp_runtime=options.wants_mcp_runtime,
         assume_yes=options.assume_yes,
         summary=summary,
     )
+    if runtime_applied:
+        run_planned_commands(plan, category="mcp-install")
+        summary.mark_applied("MCP dependencies and populated search index")
     apply_hooks_if_approved(
         plan.repo,
         hook_choice=options.hook_choice,
@@ -1110,17 +1200,28 @@ def apply_requested_setup(plan: Plan, options: ApplyOptions) -> None:
 
 def main() -> None:
     args = parser().parse_args()
+    if args.uninstall_mcp_runtime:
+        target = mcp_home()
+        if args.apply and confirm(f"Remove {target} and all clean-code MCP state", assume_yes=args.yes):
+            uninstall_mcp_runtime()
+            print(f"Removed {target}")
+        else:
+            print(f"Would remove {target}; rerun with --uninstall-mcp-runtime --apply")
+        return
     repo = Path(args.repo).resolve()
     if not repo.exists():
         raise SystemExit(f"Repo does not exist: {repo}")
     target_repo = resolve_target_repo(repo, args.target)
-    wants_mcp_runtime = args.mcp_runtime or args.start_mcp_runtime
-    plan = build_plan(
-        target_repo,
-        allow_dirty=args.allow_dirty,
-        require_languages=not wants_mcp_runtime,
-        allow_root_monorepo=args.allow_root_monorepo,
-    )
+    wants_mcp_runtime = not args.no_mcp_runtime or args.start_mcp_runtime
+    if args.mcp_only:
+        plan = Plan(repo=target_repo, git_root=git_root_for(target_repo))
+    else:
+        plan = build_plan(
+            target_repo,
+            allow_dirty=args.allow_dirty,
+            require_languages=not wants_mcp_runtime,
+            allow_root_monorepo=args.allow_root_monorepo,
+        )
     add_noninteractive_hook_blocker(
         plan,
         apply=args.apply,
