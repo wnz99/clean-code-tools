@@ -12,7 +12,9 @@ from mcp_server.models import DEFAULT_EMBEDDING_MODEL, CleanCodeChunk, JsonDict
 INDEX_SCHEMA_VERSION = "clean-code-sqlite-vec-v1"
 DEFAULT_BATCH_SIZE = 64
 VECTOR_INDEX_PATH_ENV_VAR = "CLEAN_CODE_VECTOR_INDEX_PATH"
-DEFAULT_INDEX_PATH = os.environ.get(VECTOR_INDEX_PATH_ENV_VAR, str(Path.cwd() / ".clean-code-index.sqlite"))
+RUNTIME_HOME = Path(__file__).resolve().parents[4]
+DEFAULT_INDEX_PATH = os.environ.get(VECTOR_INDEX_PATH_ENV_VAR, str(RUNTIME_HOME / "clean-code-index.sqlite"))
+FASTEMBED_CACHE_PATH = RUNTIME_HOME / "cache" / "fastembed"
 SQLITE_VEC_INSTALL_MESSAGE = (
     "Install sqlite-vec to use local clean-code vector search: python3 -m pip install sqlite-vec"
 )
@@ -95,7 +97,7 @@ def embed_texts(texts: list[str], *, model_name: str, batch_size: int) -> list[l
         from fastembed import TextEmbedding  # noqa: PLC0415
     except ImportError as exc:
         raise SystemExit(FASTEMBED_INSTALL_MESSAGE) from exc
-    model = TextEmbedding(model_name=model_name)
+    model = TextEmbedding(model_name=model_name, cache_dir=str(FASTEMBED_CACHE_PATH))
     return [[float(value) for value in vector] for vector in model.embed(texts, batch_size=batch_size)]
 
 

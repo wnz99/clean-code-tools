@@ -59,8 +59,8 @@ There are two separate install steps:
 
 ### 1. Install The Agent Skill
 
-Clone this repo, then install the skill into the active agent's skills
-directory.
+Clone this repo, then install the skill into the target project's agent skills
+directory. Run from that project or pass `--project` explicitly.
 
 For Codex:
 
@@ -69,7 +69,8 @@ python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex
 ```
 
 This installs `skills/clean-code-mcp-reviewer` into
-`${CODEX_HOME:-~/.codex}/skills`.
+`<project>/.codex/skills`. It also installs and indexes the shared MCP runtime
+under `~/.clean-code-tools` by default; pass `--no-mcp-runtime` to opt out.
 
 For Claude Code:
 
@@ -77,7 +78,7 @@ For Claude Code:
 python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent claude
 ```
 
-This installs the same skill into `~/.claude/skills`.
+This installs the same skill into `<project>/.claude/skills`.
 
 If the skill is already installed and you want to update it from a newer clone,
 add `--replace`:
@@ -149,7 +150,7 @@ python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install
 ```
 
 `--apply` is interactive by default. It asks before modifying config files,
-installing packages, copying the local MCP runtime, starting local services,
+installing packages, installing the shared MCP runtime, starting local services,
 or installing Git hooks. For automation, use `--yes` only after the plan is
 already approved. Non-interactive applies must make hook intent explicit:
 use `--git-hooks pre-push` for the recommended hook setup or `--git-hooks none`
@@ -270,30 +271,29 @@ Built-in `CC-###` records are read-only. Custom patterns use `CUSTOM-###` or a
 repo namespace such as `BILLING-001`, are validated with Pydantic before writes,
 and can optionally be synced into the local sqlite-vec index.
 
-## Local MCP Runtime
+## Shared MCP Runtime
 
-The skill can copy the Python MCP runtime into a target repo or host folder:
+The installer installs the Python MCP runtime by default into
+`${CLEAN_CODE_TOOLS_HOME:-~/.clean-code-tools}`. The runtime, virtual
+environment, corpus, generated SQLite index, and other MCP state stay out of
+target projects. Installation also populates the index:
 
 ```bash
-python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --mcp-runtime --apply
+python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --apply
 ```
 
-To copy the runtime files and start the MCP server:
+To install, index, and start the MCP server:
 
 ```bash
 python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --start-mcp-runtime --apply
 ```
 
-This creates `.clean-code-mcp/`. Starting the copied runtime requires
-`pydantic`, `fastmcp`, `fastembed`, and `sqlite-vec` in the Python interpreter
-running the installer; `--start-mcp-runtime` blocks during planning when those
-modules are missing.
-
-The local sqlite-vec index is stored as a regular SQLite file. Build it before
-searching:
+The installer creates an isolated environment and installs `pydantic`,
+`fastmcp`, `fastembed`, and `sqlite-vec` there. Pass `--no-mcp-runtime` to opt
+out. Remove the complete shared runtime and its state with:
 
 ```bash
-python .clean-code-mcp/runtime/scripts/sqlite_vec_ingest_clean_code.py
+python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --uninstall-mcp-runtime --apply
 ```
 
 Default ports:

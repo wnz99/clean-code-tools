@@ -32,14 +32,15 @@ def run_git(repo: Path, *args: str) -> None:
 
 
 class InstallCodexSkillTest(unittest.TestCase):
-    def test_default_dest_root_uses_codex_home(self) -> None:
+    def test_default_dest_root_uses_project_codex_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            codex_home = Path(tmp) / "codex"
-            with mock.patch.dict(os.environ, {"CODEX_HOME": str(codex_home)}):
-                self.assertEqual(installer.default_dest_root("codex"), codex_home / "skills")
+            project = Path(tmp).resolve()
+            self.assertEqual(installer.default_dest_root("codex", project), project / ".codex" / "skills")
 
-    def test_default_dest_root_supports_claude(self) -> None:
-        self.assertEqual(installer.default_dest_root("claude"), Path.home() / ".claude" / "skills")
+    def test_default_dest_root_supports_project_local_claude(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp).resolve()
+            self.assertEqual(installer.default_dest_root("claude", project), project / ".claude" / "skills")
 
     def test_install_copies_skill_and_ignores_bytecode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -169,6 +170,26 @@ class InstallCodexSkillTest(unittest.TestCase):
 
             self.assertIn("Would install", output.getvalue())
 
+    def test_runtime_install_uses_installed_project_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            skill = root / ".codex" / "skills" / "clean-code-mcp-reviewer"
+            installer_path = skill / "scripts" / "install_clean_code_linting.py"
+            installer_path.parent.mkdir(parents=True)
+            installer_path.write_text("# test\n")
+            with mock.patch.object(installer, "run") as run_mock:
+                installer.install_mcp_runtime(skill, root)
+            command = run_mock.call_args.args[0]
+            self.assertIn(str(installer_path), command)
+            self.assertIn("--mcp-only", command)
+            self.assertIn("--apply", command)
+
+    def test_shared_mcp_home_honors_configured_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            configured = Path(tmp).resolve() / "runtime-home"
+            with mock.patch.dict(os.environ, {"CLEAN_CODE_TOOLS_HOME": str(configured)}):
+                self.assertEqual(installer.shared_mcp_home(), configured)
+
     def test_fetch_skill_source_from_main_clones_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -221,6 +242,7 @@ class InstallCodexSkillTest(unittest.TestCase):
                         "--remote-url",
                         str(remote),
                         "--replace",
+                        "--no-mcp-runtime",
                     ],
                 ),
                 redirect_stdout(output),
