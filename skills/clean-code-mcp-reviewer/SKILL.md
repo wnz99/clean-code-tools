@@ -1,6 +1,6 @@
 ---
 name: clean-code-mcp-reviewer
-description: Use this skill whenever reviewing, refactoring, or designing lint checks for TypeScript, JavaScript, Python, or React code where clean-code patterns may help. This skill teaches agents how to use the clean-code MCP interactively: read code first, form concrete smell hypotheses, query the MCP narrowly, suppress weak matches, and apply only guidance anchored to local code evidence. Use it for maintainability reviews, readability concerns, refactor planning, and clean-code lint-rule design, even when the user does not explicitly mention MCP.
+description: "Use this skill whenever reviewing, refactoring, or designing lint checks for TypeScript, JavaScript, Python, or React code where clean-code patterns may help. This skill teaches agents how to use the clean-code MCP interactively: read code first, form concrete smell hypotheses, query the MCP narrowly, suppress weak matches, and apply only guidance anchored to local code evidence. Use it for maintainability reviews, readability concerns, refactor planning, and clean-code lint-rule design, even when the user does not explicitly mention MCP."
 ---
 
 # Clean-Code MCP Reviewer
@@ -23,8 +23,11 @@ Python, JavaScript, TypeScript, or React code.
 
 ## Installing Or Updating This Skill
 
-When the user asks to install or update this Codex skill itself, do not run the
-linting configurator. From a clone of `wnz99/clean-code-tools`, run:
+When the user asks to install or update this skill, install it inside the target
+project rather than a user-level skills directory. Run from the target project
+or pass `--project`. The installer also installs and indexes the shared MCP
+runtime under `${CLEAN_CODE_TOOLS_HOME:-~/.clean-code-tools}` by default. From a
+clone of `wnz99/clean-code-tools`, run:
 
 ```bash
 python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex --replace
@@ -133,7 +136,7 @@ python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py -
 
 `--apply` is still interactive by default. The installer asks before every
 host-side action it offers: modifying lint config files, installing packages,
-copying the local MCP runtime, starting local services, or installing Git
+installing the shared MCP runtime, starting local services, or installing Git
 hooks. For non-interactive automation, pass `--yes` only after the user has
 already approved the whole plan and each selected setup category is intentional.
 When using `--apply --yes`, always pass an explicit hook decision:
@@ -259,27 +262,28 @@ candidate locations and suggested MCP queries, read the named files first, use
 this skill, query the MCP narrowly, and decide whether each candidate is a real
 maintainability issue in context.
 
-## Installing The Local MCP Runtime
+## Installing And Removing The Shared MCP Runtime
 
-When the user wants the clean-code MCP copied into another repo or host folder,
-use the bundled local Python runtime. It includes:
+Install the bundled Python runtime by default in
+`${CLEAN_CODE_TOOLS_HOME:-~/.clean-code-tools}`. Never put runtime files,
+dependencies, indexes, logs, or generated MCP state in the target project. It includes:
 
 - `runtime/`: bundled MCP server source, ingest script, and clean-code corpus
 
-Plan the runtime install from the target repo or host folder:
+Plan the runtime install with the normal installer invocation:
 
 ```bash
-python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --mcp-runtime
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py
 ```
 
 Apply after the user accepts the plan:
 
 ```bash
-python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --mcp-runtime --apply
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --apply
 ```
 
-This creates `.clean-code-mcp/` in the target folder. To start the MCP server
-after copying, use:
+This installs isolated dependencies and populates the SQLite index before
+reporting success. To start the MCP server after installation, use:
 
 ```bash
 python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --start-mcp-runtime --apply
@@ -289,21 +293,19 @@ The stack exposes:
 
 - Clean-code MCP HTTP: `http://127.0.0.1:8765`
 
-The runtime start path requires `pydantic`, `fastmcp`, `fastembed`, and
-`sqlite-vec` in the Python interpreter running the installer. The installer
-blocks `--start-mcp-runtime` during planning when those modules are missing.
 Use `CLEAN_CODE_MCP_PORT` when the default port is occupied.
 
-The sqlite-vec index is a regular local SQLite file. Build it before searching:
+Use `--no-mcp-runtime` only when the user explicitly opts out. If the user asks
+to uninstall MCP support, remove the entire shared home with:
 
 ```bash
-python .clean-code-mcp/runtime/scripts/sqlite_vec_ingest_clean_code.py
+python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --uninstall-mcp-runtime --apply
 ```
 
 Manual command after copy-only install:
 
 ```bash
-python .clean-code-mcp/runtime/scripts/clean_code_mcp_server.py --transport http --host 127.0.0.1 --port 8765
+~/.clean-code-tools/.venv/bin/python ~/.clean-code-tools/runtime/scripts/clean_code_mcp_server.py --transport http --host 127.0.0.1 --port 8765
 ```
 
 ## Refactor Discipline

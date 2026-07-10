@@ -5,6 +5,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -37,10 +38,9 @@ class InstallError(Exception):
         return cls(f"Failed to fetch the latest skill source:\n{output.strip()}")
 
 
-def default_dest_root(agent: str) -> Path:
-    if agent == "codex":
-        return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser() / "skills"
-    return Path.home() / ".claude" / "skills"
+def default_dest_root(agent: str, project: Path) -> Path:
+    agent_directory = ".codex" if agent == "codex" else ".claude"
+    return project.expanduser().resolve() / agent_directory / "skills"
 
 
 def validate_skill_source(source: Path) -> None:
@@ -116,19 +116,48 @@ def install_skill(source: Path, dest_root: Path, *, name: str, replace: bool, dr
     return destination
 
 
+def install_mcp_runtime(skill: Path, project: Path) -> None:
+    installer = skill / "scripts" / "install_clean_code_linting.py"
+    run(
+        [
+            sys.executable,
+            str(installer),
+            "--repo",
+            str(project.resolve()),
+            "--mcp-only",
+            "--apply",
+            "--yes",
+            "--git-hooks",
+            "none",
+            "--no-backup",
+        ]
+    )
+
+
+def shared_mcp_home() -> Path:
+    configured = os.environ.get("CLEAN_CODE_TOOLS_HOME")
+    return Path(configured).expanduser().resolve() if configured else Path.home() / ".clean-code-tools"
+
+
 def parser() -> argparse.ArgumentParser:
-    cli = argparse.ArgumentParser(description="Install the clean-code agent skill locally.")
+    cli = argparse.ArgumentParser(description="Install the clean-code agent skill into a project.")
     cli.add_argument(
         "--agent",
         choices=AGENTS,
         default="codex",
-        help="Agent skills directory to target when --dest is not set.",
+        help="Project-local agent skills directory to target when --dest is not set.",
     )
+    cli.add_argument("--project", default=".", help="Project root for the local skill installation.")
     cli.add_argument("--source", default=str(DEFAULT_SOURCE), help="Skill source directory.")
     cli.add_argument("--dest", help="Destination skills directory.")
     cli.add_argument("--name", default=DEFAULT_SKILL_NAME, help="Installed skill directory name.")
     cli.add_argument("--replace", action="store_true", help="Overwrite an existing installed skill.")
     cli.add_argument("--dry-run", action="store_true", help="Print the destination without copying files.")
+    cli.add_argument(
+        "--no-mcp-runtime",
+        action="store_true",
+        help="Install only the project-local skill and skip the default shared MCP installation.",
+    )
     cli.add_argument(
         "--from-main",
         action="store_true",
@@ -149,7 +178,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = parser().parse_args()
-    dest_root = Path(args.dest) if args.dest else default_dest_root(args.agent)
+    dest_root = Path(args.dest) if args.dest else default_dest_root(args.agent, Path(args.project))
     temp_dir: tempfile.TemporaryDirectory[str] | None = None
     try:
         source = Path(args.source)
@@ -176,7 +205,10 @@ def main() -> None:
     action = "Would install" if args.dry_run else "Installed"
     print(f"{action} {args.name} to {destination}")
     if not args.dry_run:
-        print("Restart Codex to pick up the skill.")
+        if not args.no_mcp_runtime:
+            install_mcp_runtime(destination, Path(args.project))
+            print(f"Installed and indexed the shared MCP runtime in {shared_mcp_home()}.")
+        print("Restart the agent in this project to pick up the skill.")
         print("Then ask: Use $clean-code-mcp-reviewer to inspect this repo and plan installation.")
 
 

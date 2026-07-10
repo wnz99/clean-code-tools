@@ -203,21 +203,18 @@ class CleanCodeInstallerTest(unittest.TestCase):
             installer.add_verification_plan(plan)
             self.assertEqual(plan.verification[0].command, ["ruff", "check", "."])
 
-            installer.plan_mcp_runtime(repo, plan, start=False)
-            self.assertTrue(any(installer.MCP_RUNTIME_TARGET in change.label for change in plan.changes))
-            with mock.patch.object(installer, "missing_runtime_modules", return_value=[]):
-                env = {installer.MCP_RUNTIME_PORT_ENV: "9999"}
-                with mock.patch.dict(installer.os.environ, env, clear=False):
-                    start_plan = installer.Plan(repo=repo, git_root=repo)
-                    installer.plan_mcp_runtime(repo, start_plan, start=True)
-            self.assertEqual(start_plan.commands[0].command[-1], "9999")
-            with mock.patch.object(installer, "missing_runtime_modules", return_value=["fastmcp"]):
-                blocked_plan = installer.Plan(repo=repo, git_root=repo)
-                installer.plan_mcp_runtime(repo, blocked_plan, start=True)
-            self.assertTrue(any("Cannot start" in blocker for blocker in blocked_plan.blockers))
-            (repo / installer.MCP_RUNTIME_TARGET).mkdir()
-            installer.plan_mcp_runtime(repo, plan, start=True)
-            self.assertTrue(any("already exists" in blocker for blocker in plan.blockers))
+            runtime_home = repo / "shared-runtime"
+            env = {
+                installer.MCP_HOME_ENV: str(runtime_home),
+                installer.MCP_RUNTIME_PORT_ENV: "9999",
+            }
+            with mock.patch.dict(installer.os.environ, env, clear=False):
+                installer.plan_mcp_runtime(repo, plan, start=False)
+                self.assertTrue(any(str(runtime_home) in change.label for change in plan.changes))
+                self.assertTrue(installer.has_commands(plan, "mcp-install"))
+                start_plan = installer.Plan(repo=repo, git_root=repo)
+                installer.plan_mcp_runtime(repo, start_plan, start=True)
+            self.assertEqual(start_plan.commands[-1].command[-1], "9999")
 
             self.assertEqual(installer.selected_hooks("both"), ("pre-commit", "pre-push"))
             self.assertEqual(installer.selected_hooks("none"), ())
@@ -345,7 +342,7 @@ class CleanCodeInstallerTest(unittest.TestCase):
             runtime_mock.assert_called_once_with(repo)
             hooks_mock.assert_called_once()
             self.assertEqual(commands_mock.call_count, 2)
-            self.assertIn(f"{installer.MCP_RUNTIME_TARGET}/ runtime files", summary.applied)
+            self.assertTrue(any("MCP files" in item for item in summary.applied))
             self.assertIn("Git hooks (pre-push, advisory)", summary.applied)
             self.assertIn("development dependencies", summary.applied)
             self.assertIn("local MCP runtime start", summary.applied)
@@ -464,10 +461,92 @@ class CleanCodeInstallerTest(unittest.TestCase):
 
     def test_apply_mcp_runtime_copies_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp).resolve()
-            installer.apply_mcp_runtime(repo)
-            runtime = repo / installer.MCP_RUNTIME_TARGET
+            root = Path(tmp).resolve()
+            repo = root / "project"
+            repo.mkdir()
+            runtime = root / installer.MCP_HOME_NAME
+            with mock.patch.dict(installer.os.environ, {installer.MCP_HOME_ENV: str(runtime)}):
+                installer.apply_mcp_runtime(repo)
             self.assertTrue((runtime / "runtime").is_dir())
+            self.assertTrue((runtime / installer.MCP_OWNERSHIP_MARKER).is_file())
+            self.assertFalse((repo / ".clean-code-mcp").exists())
+            stale_file = runtime / "runtime" / "stale.py"
+            stale_file.write_text("obsolete")
+            with mock.patch.dict(installer.os.environ, {installer.MCP_HOME_ENV: str(runtime)}):
+                installer.apply_mcp_runtime(repo)
+            self.assertFalse(stale_file.exists())
+
+            runtime_python = runtime / "runtime" / "src" / "python"
+            check_cache = """
+import sys
+import types
+from mcp_server import custom_patterns, sqlite_vec_store
+
+seen = {}
+class FakeEmbedding:
+    def __init__(self, **kwargs):
+        seen.update(kwargs)
+    def embed(self, texts, *, batch_size):
+        return [[1.0] for _ in texts]
+
+sys.modules["fastembed"] = types.SimpleNamespace(TextEmbedding=FakeEmbedding)
+sqlite_vec_store.embed_texts(["x"], model_name="fake", batch_size=1)
+assert seen["cache_dir"] == str(sqlite_vec_store.FASTEMBED_CACHE_PATH)
+assert sqlite_vec_store.RUNTIME_HOME in sqlite_vec_store.FASTEMBED_CACHE_PATH.parents
+assert custom_patterns.DEFAULT_CUSTOM_PATTERN_RECORDS == (
+    sqlite_vec_store.RUNTIME_HOME / "data" / "custom-clean-code-patterns.jsonl"
+)
+"""
+            subprocess.run(  # noqa: S603
+                [sys.executable, "-c", check_cache],
+                env={"PYTHONPATH": str(runtime_python)},
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+    def test_uninstall_mcp_runtime_removes_all_shared_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp).resolve() / installer.MCP_HOME_NAME
+            runtime.mkdir()
+            (runtime / installer.MCP_OWNERSHIP_MARKER).write_text(installer.MCP_OWNERSHIP_CONTENT)
+            (runtime / installer.MCP_INDEX_NAME).write_text("index")
+            with mock.patch.dict(installer.os.environ, {installer.MCP_HOME_ENV: str(runtime)}):
+                installer.uninstall_mcp_runtime()
+            self.assertFalse(runtime.exists())
+
+    def test_uninstall_refuses_unowned_or_unsafe_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            unowned = Path(tmp).resolve() / "unowned"
+            unowned.mkdir()
+            with (
+                mock.patch.dict(installer.os.environ, {installer.MCP_HOME_ENV: str(unowned)}),
+                self.assertRaises(SystemExit),
+            ):
+                installer.uninstall_mcp_runtime()
+            self.assertTrue(unowned.exists())
+
+        with (
+            mock.patch.dict(installer.os.environ, {installer.MCP_HOME_ENV: str(Path.home())}),
+            self.assertRaises(SystemExit),
+        ):
+            installer.uninstall_mcp_runtime()
+
+    def test_install_refuses_to_claim_existing_unowned_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp).resolve() / "project"
+            repo.mkdir()
+            runtime = Path(tmp).resolve() / "existing-data"
+            runtime.mkdir()
+            protected = runtime / "important.txt"
+            protected.write_text("keep")
+            with (
+                mock.patch.dict(installer.os.environ, {installer.MCP_HOME_ENV: str(runtime)}),
+                self.assertRaises(SystemExit),
+            ):
+                installer.apply_mcp_runtime(repo)
+            self.assertEqual(protected.read_text(), "keep")
+            self.assertFalse((runtime / installer.MCP_OWNERSHIP_MARKER).exists())
 
 
     def test_nested_package_uses_ancestor_pnpm_workspace(self) -> None:
