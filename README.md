@@ -101,6 +101,21 @@ does not need to be current before updating the installed skill.
 
 Restart the agent after installation so the skill is discovered.
 
+Configure the clean-code MCP launcher with the shared runtime home as both the
+allowed index base and the location of the populated index. Use absolute paths
+in JSON or TOML launcher configuration:
+
+```text
+CLEAN_CODE_INDEX_BASE=/absolute/path/to/.clean-code-tools
+CLEAN_CODE_VECTOR_INDEX_PATH=/absolute/path/to/.clean-code-tools/clean-code-index.sqlite
+```
+
+With the default installation, `/absolute/path/to/.clean-code-tools` is
+`$HOME/.clean-code-tools`. If `CLEAN_CODE_TOOLS_HOME` overrides the runtime
+home, use that directory instead. After restarting, verify both
+`clean_code_index_info` and a narrow `search_clean_code_patterns` query. The
+installation is not valid if metadata works but pattern search fails.
+
 Then ask the agent from inside the target repo:
 
 ```text
@@ -285,7 +300,10 @@ python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install
 To install, index, and start the MCP server:
 
 ```bash
-python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --start-mcp-runtime --apply
+CLEAN_CODE_INDEX_BASE="${CLEAN_CODE_TOOLS_HOME:-$HOME/.clean-code-tools}" \
+CLEAN_CODE_VECTOR_INDEX_PATH="${CLEAN_CODE_TOOLS_HOME:-$HOME/.clean-code-tools}/clean-code-index.sqlite" \
+  python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py \
+  --start-mcp-runtime --apply
 ```
 
 The installer creates an isolated environment and installs `pydantic`,

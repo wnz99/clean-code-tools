@@ -139,6 +139,14 @@ def shared_mcp_home() -> Path:
     return Path(configured).expanduser().resolve() if configured else Path.home() / ".clean-code-tools"
 
 
+def print_mcp_launcher_requirements(home: Path) -> None:
+    """Print the environment contract required by project-local MCP launchers."""
+    print("Configure the clean-code MCP launcher with:")
+    print(f"  CLEAN_CODE_INDEX_BASE={home}")
+    print(f"  CLEAN_CODE_VECTOR_INDEX_PATH={home / 'clean-code-index.sqlite'}")
+    print("After restarting the agent, verify search_clean_code_patterns returns results.")
+
+
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(description="Install the clean-code agent skill into a project.")
     cli.add_argument(
@@ -207,7 +215,9 @@ def main() -> None:
     if not args.dry_run:
         if not args.no_mcp_runtime:
             install_mcp_runtime(destination, Path(args.project))
-            print(f"Installed and indexed the shared MCP runtime in {shared_mcp_home()}.")
+            home = shared_mcp_home()
+            print(f"Installed and indexed the shared MCP runtime in {home}.")
+            print_mcp_launcher_requirements(home)
         print("Restart the agent in this project to pick up the skill.")
         print("Then ask: Use $clean-code-mcp-reviewer to inspect this repo and plan installation.")
 

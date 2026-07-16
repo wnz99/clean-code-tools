@@ -48,6 +48,27 @@ directory and installs the skill from that checkout, so it does not depend on
 the local clone being up to date. Then tell the user to restart the agent before
 expecting the updated skill behavior.
 
+The MCP launcher must pass the shared runtime home as its allowed index base and
+must point search at the populated index. For the default installation, add
+these variables to the clean-code MCP server's `env` configuration:
+
+```text
+CLEAN_CODE_INDEX_BASE=~/.clean-code-tools
+CLEAN_CODE_VECTOR_INDEX_PATH=~/.clean-code-tools/clean-code-index.sqlite
+```
+
+Expand `~` to an absolute path in launchers that do not perform shell
+expansion. If `CLEAN_CODE_TOOLS_HOME` selected another runtime home, use that
+same absolute directory for both variables. This is part of installation, not
+optional hardening: without `CLEAN_CODE_INDEX_BASE`, metadata calls can find the
+shared index while pattern-search requests reject it as outside their allowed
+filesystem scope.
+
+After restarting the agent, call `clean_code_index_info`, then run a narrow
+`search_clean_code_patterns` query. Installation is incomplete unless both
+succeed and search returns pattern results; metadata success alone is not a
+valid smoke test.
+
 ## Installing Clean-Code Linting
 
 When the user asks to install, configure, adopt, bootstrap, or integrate the
@@ -305,7 +326,11 @@ python3 /path/to/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py -
 Manual command after copy-only install:
 
 ```bash
-~/.clean-code-tools/.venv/bin/python ~/.clean-code-tools/runtime/scripts/clean_code_mcp_server.py --transport http --host 127.0.0.1 --port 8765
+CLEAN_CODE_INDEX_BASE="$HOME/.clean-code-tools" \
+CLEAN_CODE_VECTOR_INDEX_PATH="$HOME/.clean-code-tools/clean-code-index.sqlite" \
+  ~/.clean-code-tools/.venv/bin/python \
+  ~/.clean-code-tools/runtime/scripts/clean_code_mcp_server.py \
+  --transport http --host 127.0.0.1 --port 8765
 ```
 
 ## Refactor Discipline
