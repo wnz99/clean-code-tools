@@ -190,6 +190,22 @@ class InstallCodexSkillTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {"CLEAN_CODE_TOOLS_HOME": str(configured)}):
                 self.assertEqual(installer.shared_mcp_home(), configured)
 
+    def test_launcher_requirements_include_allowed_base_and_index(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve() / "runtime-home"
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                installer.print_mcp_launcher_requirements(home)
+
+            rendered = output.getvalue()
+            self.assertIn(f"CLEAN_CODE_INDEX_BASE={home}", rendered)
+            self.assertIn(
+                f"CLEAN_CODE_VECTOR_INDEX_PATH={home / 'clean-code-index.sqlite'}",
+                rendered,
+            )
+            self.assertIn("search_clean_code_patterns", rendered)
+
     def test_fetch_skill_source_from_main_clones_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
