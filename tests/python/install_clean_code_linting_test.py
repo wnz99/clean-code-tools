@@ -220,7 +220,19 @@ class CleanCodeInstallerTest(unittest.TestCase):
             self.assertEqual(installer.selected_hooks("none"), ())
             self.assertIn("default", installer.describe_hook_selection("ask", apply=True, assume_yes=False))
             self.assertIn("none selected", installer.describe_hook_selection("none", apply=True, assume_yes=True))
-            self.assertIn("pre-push", installer.describe_hook_selection("pre-push", apply=False, assume_yes=False))
+            self.assertEqual(
+                installer.describe_hook_selection("pre-push", apply=False, assume_yes=False),
+                "pre-push in advisory mode",
+            )
+            self.assertEqual(
+                installer.describe_hook_selection(
+                    "pre-push",
+                    apply=False,
+                    assume_yes=False,
+                    mode="blocking",
+                ),
+                "pre-push in blocking mode",
+            )
 
     def test_hook_planning_and_apply_branches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

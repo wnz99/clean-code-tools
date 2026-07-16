@@ -755,7 +755,13 @@ def plan_git_hooks(repo: Path, plan: Plan, *, choice: str, mode: str) -> None:
         )
 
 
-def describe_hook_selection(choice: str, *, apply: bool, assume_yes: bool) -> str:
+def describe_hook_selection(
+    choice: str,
+    *,
+    apply: bool,
+    assume_yes: bool,
+    mode: str = "advisory",
+) -> str:
     if choice == "ask":
         if apply and assume_yes:
             return "unresolved; --apply --yes must pass --git-hooks none, pre-push, pre-commit, or both"
@@ -765,7 +771,7 @@ def describe_hook_selection(choice: str, *, apply: bool, assume_yes: bool) -> st
     hooks = selected_hooks(choice)
     if not hooks:
         return "none selected"
-    return f"{', '.join(hooks)} in advisory mode by default"
+    return f"{', '.join(hooks)} in {mode} mode"
 
 
 def add_noninteractive_hook_blocker(plan: Plan, *, apply: bool, assume_yes: bool, hook_choice: str) -> None:
@@ -1238,7 +1244,8 @@ def main() -> None:
             "Git hook setup will be offered during --apply. Use --git-hooks none to skip the prompt."
         )
     plan.warnings.append(
-        f"Git hook selection: {describe_hook_selection(args.git_hooks, apply=args.apply, assume_yes=args.yes)}."
+        "Git hook selection: "
+        f"{describe_hook_selection(args.git_hooks, apply=args.apply, assume_yes=args.yes, mode=args.git_hook_mode)}."
     )
     print_plan(plan)
     if args.apply:
