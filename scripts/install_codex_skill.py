@@ -2,12 +2,18 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SKILL_NAME = "clean-code-mcp-reviewer"
@@ -15,6 +21,31 @@ DEFAULT_SOURCE = REPO_ROOT / "skills" / DEFAULT_SKILL_NAME
 DEFAULT_REMOTE_URL = "https://github.com/wnz99/clean-code-tools.git"
 DEFAULT_UPDATE_BRANCH = "main"
 AGENTS = ("claude", "codex")
+MCP_SERVER_NAME = "clean-code-tools"
+CODEX_MCP_START = "# BEGIN clean-code-tools managed MCP"
+CODEX_MCP_END = "# END clean-code-tools managed MCP"
+
+
+class McpRegistrationRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    agent: Literal["claude", "codex"]
+    project: Path
+    home: Path
+
+
+class McpServerConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    command: str
+    args: list[str]
+    env: dict[str, str]
+
+
+class ClaudeMcpConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    mcpServers: dict[str, McpServerConfig | JsonValue] = Field(default_factory=dict)
 
 
 class InstallError(Exception):
@@ -36,6 +67,13 @@ class InstallError(Exception):
     @classmethod
     def failed_git_command(cls, output: str) -> InstallError:
         return cls(f"Failed to fetch the latest skill source:\n{output.strip()}")
+
+    @classmethod
+    def unmanaged_codex_mcp(cls, config_path: Path) -> InstallError:
+        return cls(
+            f"Refusing to overwrite unmanaged Codex MCP server {MCP_SERVER_NAME!r} "
+            f"in {config_path}."
+        )
 
 
 def default_dest_root(agent: str, project: Path) -> Path:
@@ -134,6 +172,84 @@ def install_mcp_runtime(skill: Path, project: Path) -> None:
     )
 
 
+def runtime_python(home: Path) -> Path:
+    if os.name == "nt":
+        return home / ".venv" / "Scripts" / "python.exe"
+    return home / ".venv" / "bin" / "python"
+
+
+def mcp_server_config(home: Path) -> McpServerConfig:
+    return McpServerConfig(
+        command=str(runtime_python(home)),
+        args=[str(home / "runtime" / "scripts" / "clean_code_mcp_server.py")],
+        env={
+            "CLEAN_CODE_INDEX_BASE": str(home),
+            "CLEAN_CODE_VECTOR_INDEX_PATH": str(home / "clean-code-index.sqlite"),
+        },
+    )
+
+
+def codex_mcp_block(config: McpServerConfig) -> str:
+    command = json.dumps(config.command)
+    args = ", ".join(json.dumps(argument) for argument in config.args)
+    env = "\n".join(f"{key} = {json.dumps(value)}" for key, value in config.env.items())
+    return (
+        f"{CODEX_MCP_START}\n"
+        f"[mcp_servers.{MCP_SERVER_NAME}]\n"
+        f"command = {command}\n"
+        f"args = [{args}]\n\n"
+        f"[mcp_servers.{MCP_SERVER_NAME}.env]\n"
+        f"{env}\n"
+        f"{CODEX_MCP_END}"
+    )
+
+
+def register_codex_mcp(project: Path, config: McpServerConfig) -> Path:
+    config_path = project / ".codex" / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    current = config_path.read_text() if config_path.exists() else ""
+    if current:
+        tomllib.loads(current)
+    block = codex_mcp_block(config)
+    managed_pattern = re.compile(
+        rf"{re.escape(CODEX_MCP_START)}.*?{re.escape(CODEX_MCP_END)}",
+        re.DOTALL,
+    )
+    if managed_pattern.search(current):
+        updated = managed_pattern.sub(block, current, count=1)
+    else:
+        parsed = tomllib.loads(current) if current else {}
+        existing_servers = parsed.get("mcp_servers", {})
+        if MCP_SERVER_NAME in existing_servers:
+            raise InstallError.unmanaged_codex_mcp(config_path)
+        separator = "\n\n" if current.strip() else ""
+        updated = f"{current.rstrip()}{separator}{block}\n"
+    tomllib.loads(updated)
+    config_path.write_text(updated)
+    return config_path
+
+
+def register_claude_mcp(project: Path, config: McpServerConfig) -> Path:
+    config_path = project / ".mcp.json"
+    if config_path.exists():
+        parsed = ClaudeMcpConfig.model_validate_json(config_path.read_text())
+    else:
+        parsed = ClaudeMcpConfig()
+    parsed.mcpServers[MCP_SERVER_NAME] = config
+    config_path.write_text(parsed.model_dump_json(indent=2) + "\n")
+    return config_path
+
+
+def register_mcp_launcher(*, agent: str, project: Path, home: Path) -> Path:
+    request = McpRegistrationRequest.model_validate(
+        {"agent": agent, "project": project.resolve(), "home": home.resolve()}
+    )
+    config = mcp_server_config(request.home)
+    if request.agent == "codex":
+        return register_codex_mcp(request.project, config)
+    return register_claude_mcp(request.project, config)
+
+
 def shared_mcp_home() -> Path:
     configured = os.environ.get("CLEAN_CODE_TOOLS_HOME")
     return Path(configured).expanduser().resolve() if configured else Path.home() / ".clean-code-tools"
@@ -217,7 +333,12 @@ def main() -> None:
             install_mcp_runtime(destination, Path(args.project))
             home = shared_mcp_home()
             print(f"Installed and indexed the shared MCP runtime in {home}.")
-            print_mcp_launcher_requirements(home)
+            launcher_config = register_mcp_launcher(
+                agent=args.agent,
+                project=Path(args.project),
+                home=home,
+            )
+            print(f"Configured the {args.agent} MCP launcher in {launcher_config}.")
         print("Restart the agent in this project to pick up the skill.")
         print("Then ask: Use $clean-code-mcp-reviewer to inspect this repo and plan installation.")
 

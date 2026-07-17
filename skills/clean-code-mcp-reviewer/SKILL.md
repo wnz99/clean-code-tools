@@ -48,9 +48,12 @@ directory and installs the skill from that checkout, so it does not depend on
 the local clone being up to date. Then tell the user to restart the agent before
 expecting the updated skill behavior.
 
-The MCP launcher must pass the shared runtime home as its allowed index base and
-must point search at the populated index. For the default installation, add
-these variables to the clean-code MCP server's `env` configuration:
+The installer registers the shared MCP runtime for the selected agent as part of
+the default installation. Codex configuration is written to the target
+project's `.codex/config.toml`; Claude configuration is written to the target
+project's `.mcp.json`. Existing unrelated configuration is preserved. The MCP
+launcher passes the shared runtime home as its allowed index base and points
+search at the populated index using:
 
 ```text
 CLEAN_CODE_INDEX_BASE=~/.clean-code-tools
@@ -59,7 +62,8 @@ CLEAN_CODE_VECTOR_INDEX_PATH=~/.clean-code-tools/clean-code-index.sqlite
 
 Expand `~` to an absolute path in launchers that do not perform shell
 expansion. If `CLEAN_CODE_TOOLS_HOME` selected another runtime home, use that
-same absolute directory for both variables. This is part of installation, not
+same absolute directory for both variables. These values are installed
+automatically; they are documented here for troubleshooting. This is not
 optional hardening: without `CLEAN_CODE_INDEX_BASE`, metadata calls can find the
 shared index while pattern-search requests reject it as outside their allowed
 filesystem scope.
