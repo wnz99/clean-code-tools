@@ -30,18 +30,30 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: bun install --frozen-lockfile
-      - name: Verify version tag came from develop
+      - name: Check for a new release
+        id: release
         run: |
           VERSION="$(bun -p "require('./package.json').version")"
           TAG="v$VERSION"
           git fetch --tags
           git rev-parse "$TAG^{commit}" >/dev/null
           git merge-base --is-ancestor "$TAG" HEAD
+          if git merge-base --is-ancestor "$TAG" "${{ github.event.before }}"; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping $TAG because it was already released before this push."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - run: bun install --frozen-lockfile
+        if: steps.release.outputs.publish == 'true'
       - run: bun run check
+        if: steps.release.outputs.publish == 'true'
       - name: Publish npm package
+        if: steps.release.outputs.publish == 'true'
         run: npm publish --tag latest
       - name: Build Python package
+        if: steps.release.outputs.publish == 'true'
         run: uv build
       - name: Publish Python package
+        if: steps.release.outputs.publish == 'true'
         run: uv publish --trusted-publishing always
