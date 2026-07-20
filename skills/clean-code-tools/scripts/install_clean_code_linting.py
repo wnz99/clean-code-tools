@@ -35,7 +35,7 @@ HOOK_SOURCE = SKILL_ROOT / "hooks" / "clean_code_agent_feedback.py"
 HOOK_CATALOG_SOURCE = SKILL_ROOT / "catalog" / "clean_code_review_triggers.json"
 HOOK_SCRIPT_NAME = "clean_code_agent_feedback.py"
 HOOK_CATALOG_NAME = "clean_code_review_triggers.json"
-HOOK_MARKER = "# clean-code-mcp-reviewer hook"
+HOOK_MARKER = "# clean-code-tools hook"
 HOOK_CHOICES = ("ask", "none", "pre-commit", "pre-push", "both")
 RECOMMENDED_HOOK_CHOICE = "pre-push"
 
@@ -743,7 +743,7 @@ def plan_git_hooks(repo: Path, plan: Plan, *, choice: str, mode: str) -> None:
         hook_path = hooks_dir / hook_name
         if hook_path.exists() and HOOK_MARKER not in hook_path.read_text(errors="ignore"):
             plan.blockers.append(
-                f"{hook_name} already exists and is not managed by clean-code-mcp-reviewer. "
+                f"{hook_name} already exists and is not managed by clean-code-tools. "
                 "Merge the hook manually or move the existing hook first."
             )
             continue

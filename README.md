@@ -16,7 +16,7 @@ layers:
   design issue, what tradeoffs apply, and what refactor is likely to be useful.
 
 The intended workflow is: run static checks first, send selected candidates to
-an agent using the `clean-code-mcp-reviewer` skill when available, then apply
+an agent using the `clean-code-tools` skill when available, then apply
 only the recommendations that match the actual code and project conventions.
 
 The repo produces two package shapes:
@@ -27,7 +27,7 @@ The repo produces two package shapes:
   Ruff/Pylint config fragment. The shared Python config also includes Deptry,
   which consuming projects install as a development dependency.
 
-It also includes the `clean-code-mcp-reviewer` Codex skill. Install the skill
+It also includes the `clean-code-tools` Codex skill. Install the skill
 first so Codex knows the workflow, then use its repo installer to detect a
 target repo's languages, propose lint/dependency-check setup, install packages,
 configure rules, and optionally add a local pre-push feedback hook.
@@ -68,7 +68,7 @@ For Codex:
 python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex
 ```
 
-This installs `skills/clean-code-mcp-reviewer` into
+This installs `skills/clean-code-tools` into
 `<project>/.codex/skills`. It also installs and indexes the shared MCP runtime
 under `~/.clean-code-tools` by default; pass `--no-mcp-runtime` to opt out.
 
@@ -119,7 +119,7 @@ installation is not valid if metadata works but pattern search fails.
 Then ask the agent from inside the target repo:
 
 ```text
-Use $clean-code-mcp-reviewer to inspect this repo and plan installation.
+Use $clean-code-tools to inspect this repo and plan installation.
 ```
 
 The expected result is a `Clean-Code Installation Plan`, not immediate file
@@ -130,7 +130,7 @@ any blocking questions.
 
 In Claude Code, invoke the installed skill by name using the skill invocation
 style supported by your Claude Code version, or ask Claude to use the
-`clean-code-mcp-reviewer` skill explicitly.
+`clean-code-tools` skill explicitly.
 
 ### 2. Install The Clean-Code Tooling
 
@@ -138,7 +138,7 @@ The installed skill's first action should be a dry-run scan. The underlying
 command is:
 
 ```bash
-python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py
+python3 /path/to/clean-code-tools/skills/clean-code-tools/scripts/install_clean_code_linting.py
 ```
 
 The default mode is a dry run. It reports detected languages, package managers,
@@ -151,7 +151,7 @@ blocks root-level workspace changes by default because creating root
 conflict with package-local policy. Prefer a package or service target:
 
 ```bash
-python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --target apps/example-app
+python3 /path/to/clean-code-tools/skills/clean-code-tools/scripts/install_clean_code_linting.py --target apps/example-app
 ```
 
 Use `--allow-root-monorepo` only after explicitly deciding that root-level
@@ -161,7 +161,7 @@ After reviewing the plan, ask the agent to apply the approved changes. The
 underlying apply command is:
 
 ```bash
-python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --apply
+python3 /path/to/clean-code-tools/skills/clean-code-tools/scripts/install_clean_code_linting.py --apply
 ```
 
 `--apply` is interactive by default. It asks before modifying config files,
@@ -175,13 +175,13 @@ which categories were applied and skipped.
 For a monorepo target, apply the same `--target` that was used during planning:
 
 ```bash
-python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --target apps/example-app --apply
+python3 /path/to/clean-code-tools/skills/clean-code-tools/scripts/install_clean_code_linting.py --target apps/example-app --apply
 ```
 
 Recommended hook setup:
 
 ```bash
-python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --apply --git-hooks pre-push
+python3 /path/to/clean-code-tools/skills/clean-code-tools/scripts/install_clean_code_linting.py --apply --git-hooks pre-push
 ```
 
 The hook runs ESLint and Ruff by default and prints MCP review candidates without
@@ -294,7 +294,7 @@ environment, corpus, generated SQLite index, and other MCP state stay out of
 target projects. Installation also populates the index:
 
 ```bash
-python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --apply
+python3 /path/to/clean-code-tools/skills/clean-code-tools/scripts/install_clean_code_linting.py --apply
 ```
 
 To install, index, and start the MCP server:
@@ -302,7 +302,7 @@ To install, index, and start the MCP server:
 ```bash
 CLEAN_CODE_INDEX_BASE="${CLEAN_CODE_TOOLS_HOME:-$HOME/.clean-code-tools}" \
 CLEAN_CODE_VECTOR_INDEX_PATH="${CLEAN_CODE_TOOLS_HOME:-$HOME/.clean-code-tools}/clean-code-index.sqlite" \
-  python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py \
+  python3 /path/to/clean-code-tools/skills/clean-code-tools/scripts/install_clean_code_linting.py \
   --start-mcp-runtime --apply
 ```
 
@@ -311,7 +311,7 @@ The installer creates an isolated environment and installs `pydantic`,
 out. Remove the complete shared runtime and its state with:
 
 ```bash
-python3 /path/to/clean-code-tools/skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py --uninstall-mcp-runtime --apply
+python3 /path/to/clean-code-tools/skills/clean-code-tools/scripts/install_clean_code_linting.py --uninstall-mcp-runtime --apply
 ```
 
 Default ports:

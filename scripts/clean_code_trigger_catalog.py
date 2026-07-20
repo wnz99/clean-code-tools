@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = (
     ROOT
     / "skills"
-    / "clean-code-mcp-reviewer"
+    / "clean-code-tools"
     / "catalog"
     / "clean_code_review_triggers.json"
 )

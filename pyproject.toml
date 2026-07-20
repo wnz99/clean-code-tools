@@ -221,12 +221,12 @@ split-on-trailing-comma = true
 "scripts/_mcp_app.py" = [
   "TRY003",
 ]
-"skills/clean-code-mcp-reviewer/scripts/install_clean_code_linting.py" = [
+"skills/clean-code-tools/scripts/install_clean_code_linting.py" = [
   "S603",
   "T201",
   "TRY003",
 ]
-"skills/clean-code-mcp-reviewer/hooks/clean_code_agent_feedback.py" = [
+"skills/clean-code-tools/hooks/clean_code_agent_feedback.py" = [
   "S603",
   "S607",
   "T201",
@@ -236,7 +236,7 @@ split-on-trailing-comma = true
   "PLR0913",
   "TRY003",
 ]
-"skills/clean-code-mcp-reviewer/runtime/src/python/mcp_server/server.py" = [
+"skills/clean-code-tools/runtime/src/python/mcp_server/server.py" = [
   "PLR0913",
 ]
 "src/python/mcp_server/semantic.py" = [

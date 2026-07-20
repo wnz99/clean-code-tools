@@ -14,7 +14,7 @@ from unittest import mock
 MODULE_PATH = (
     Path(__file__).resolve().parents[2]
     / "skills"
-    / "clean-code-mcp-reviewer"
+    / "clean-code-tools"
     / "scripts"
     / "install_clean_code_linting.py"
 )

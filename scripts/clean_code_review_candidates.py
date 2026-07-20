@@ -125,7 +125,7 @@ def review_candidate(
         file=normalize_file(trigger_input.file),
         symbol=trigger_input.symbol,
         anchor=trigger_input.anchor,
-        skill="clean-code-mcp-reviewer",
+        skill="clean-code-tools",
         triggers=(
             LintTrigger(
                 tool=trigger_input.tool,

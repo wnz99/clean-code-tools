@@ -265,7 +265,7 @@ def main() -> None:
     assert payload["candidate_count"] == 6
 
     assert {candidate["skill"] for candidate in payload["candidates"]} == {
-        "clean-code-mcp-reviewer"
+        "clean-code-tools"
     }
 
     typescript_candidates = [

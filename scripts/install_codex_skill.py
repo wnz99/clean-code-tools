@@ -16,7 +16,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SKILL_NAME = "clean-code-mcp-reviewer"
+DEFAULT_SKILL_NAME = "clean-code-tools"
 DEFAULT_SOURCE = REPO_ROOT / "skills" / DEFAULT_SKILL_NAME
 DEFAULT_REMOTE_URL = "https://github.com/wnz99/clean-code-tools.git"
 DEFAULT_UPDATE_BRANCH = "main"
@@ -340,7 +340,7 @@ def main() -> None:
             )
             print(f"Configured the {args.agent} MCP launcher in {launcher_config}.")
         print("Restart the agent in this project to pick up the skill.")
-        print("Then ask: Use $clean-code-mcp-reviewer to inspect this repo and plan installation.")
+        print("Then ask: Use $clean-code-tools to inspect this repo and plan installation.")
 
 
 if __name__ == "__main__":

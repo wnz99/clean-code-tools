@@ -285,7 +285,7 @@ def print_feedback(findings: list[Finding], *, hook_name: str, limit: int, block
     print(f"clean-code agent hook ({hook_name}): {len(findings)} semantic review candidate(s).")
     print("These are deterministic tripwires, not final findings.")
     print(
-        "Agent instruction: use skill `clean-code-mcp-reviewer` if available; "
+        "Agent instruction: use skill `clean-code-tools` if available; "
         "read each file first, then query MCP narrowly."
     )
     for index, finding in enumerate(findings[:limit], start=1):
