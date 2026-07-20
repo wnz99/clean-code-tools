@@ -4,13 +4,18 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SKILL_MD = REPO_ROOT / "skills" / "clean-code-mcp-reviewer" / "SKILL.md"
+SKILL_ROOT = REPO_ROOT / "skills" / "clean-code-tools"
+SKILL_MD = SKILL_ROOT / "SKILL.md"
+INSTALLATION_REFERENCE = SKILL_ROOT / "references" / "installation.md"
 README = REPO_ROOT / "README.md"
 
 
 class SkillDocsTest(unittest.TestCase):
     def test_installation_plan_template_is_documented_in_skill(self) -> None:
-        content = SKILL_MD.read_text()
+        skill_content = SKILL_MD.read_text()
+        self.assertIn("references/installation.md", skill_content)
+
+        content = INSTALLATION_REFERENCE.read_text()
 
         required_fragments = [
             "## Clean-Code Installation Plan",

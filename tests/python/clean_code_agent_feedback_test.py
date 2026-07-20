@@ -16,7 +16,7 @@ from unittest import mock
 HOOK_PATH = (
     Path(__file__).resolve().parents[2]
     / "skills"
-    / "clean-code-mcp-reviewer"
+    / "clean-code-tools"
     / "hooks"
     / "clean_code_agent_feedback.py"
 )

@@ -44,7 +44,7 @@ The PyPI package is `clean-code-tools-python`. It installs:
 
 The packaged config also contains a Deptry section. Install `deptry` separately
 when applying the config manually, or use the
-`clean-code-mcp-reviewer` installer, which installs it as a development
+`clean-code-tools` installer, which installs it as a development
 dependency.
 
 Before publishing:

@@ -175,7 +175,7 @@ class InstallCodexSkillTest(unittest.TestCase):
     def test_runtime_install_uses_installed_project_skill(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
-            skill = root / ".codex" / "skills" / "clean-code-mcp-reviewer"
+            skill = root / ".codex" / "skills" / "clean-code-tools"
             installer_path = skill / "scripts" / "install_clean_code_linting.py"
             installer_path.parent.mkdir(parents=True)
             installer_path.write_text("# test\n")
@@ -281,9 +281,9 @@ class InstallCodexSkillTest(unittest.TestCase):
             run_git(remote, "init", "-b", "main")
             run_git(remote, "config", "user.email", "test@example.com")
             run_git(remote, "config", "user.name", "Test User")
-            skill = remote / "skills" / "clean-code-mcp-reviewer"
+            skill = remote / "skills" / "clean-code-tools"
             skill.mkdir(parents=True)
-            (skill / "SKILL.md").write_text("---\nname: clean-code-mcp-reviewer\ndescription: test\n---\n")
+            (skill / "SKILL.md").write_text("---\nname: clean-code-tools\ndescription: test\n---\n")
             run_git(remote, "add", "skills")
             run_git(remote, "commit", "-m", "skill")
 
@@ -291,7 +291,7 @@ class InstallCodexSkillTest(unittest.TestCase):
                 remote_url=str(remote),
                 branch="main",
                 workspace=root / "workspace",
-                skill_name="clean-code-mcp-reviewer",
+                skill_name="clean-code-tools",
             )
 
             self.assertTrue((source / "SKILL.md").exists())
@@ -304,9 +304,9 @@ class InstallCodexSkillTest(unittest.TestCase):
             run_git(remote, "init", "-b", "main")
             run_git(remote, "config", "user.email", "test@example.com")
             run_git(remote, "config", "user.name", "Test User")
-            skill = remote / "skills" / "clean-code-mcp-reviewer"
+            skill = remote / "skills" / "clean-code-tools"
             skill.mkdir(parents=True)
-            (skill / "SKILL.md").write_text("---\nname: clean-code-mcp-reviewer\ndescription: from main\n---\n")
+            (skill / "SKILL.md").write_text("---\nname: clean-code-tools\ndescription: from main\n---\n")
             run_git(remote, "add", "skills")
             run_git(remote, "commit", "-m", "skill")
 
@@ -332,9 +332,9 @@ class InstallCodexSkillTest(unittest.TestCase):
             ):
                 installer.main()
 
-            installed = root / "codex" / "skills" / "clean-code-mcp-reviewer" / "SKILL.md"
+            installed = root / "codex" / "skills" / "clean-code-tools" / "SKILL.md"
             self.assertIn("from main", installed.read_text())
-            self.assertIn("Installed clean-code-mcp-reviewer", output.getvalue())
+            self.assertIn("Installed clean-code-tools", output.getvalue())
 
     def test_main_registers_mcp_for_selected_agent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
