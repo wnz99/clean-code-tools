@@ -31,6 +31,13 @@ class Finding:
     query: str
 
 
+class ChangedFilesError(RuntimeError):
+    """Raised when the hook cannot establish the requested Git diff boundary."""
+
+    def __init__(self, base_ref: str, detail: str) -> None:
+        super().__init__(f"git diff failed for {base_ref!r}: {detail}")
+
+
 def load_catalog() -> dict[str, dict[str, dict[str, Any]]]:
     for path in CATALOG_CANDIDATES:
         if path.exists():
@@ -108,8 +115,11 @@ def changed_files(repo: Path, base_ref: str) -> list[str]:
         cwd=repo,
         timeout=30,
     )
-    if completed is None or completed.returncode != 0:
-        return []
+    if completed is None:
+        raise ChangedFilesError(base_ref, "command unavailable or timed out")
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or f"exit status {completed.returncode}"
+        raise ChangedFilesError(base_ref, detail)
     return [
         line.strip()
         for line in completed.stdout.splitlines()
@@ -313,7 +323,18 @@ def main() -> None:
     args = parser.parse_args()
 
     repo = repo_root()
-    changed = changed_files(repo, args.changed_since) if args.changed_since else None
+    changed: list[str] | None = None
+    if args.changed_since:
+        try:
+            changed = changed_files(repo, args.changed_since)
+        except ChangedFilesError as error:
+            print(f"clean-code agent hook ({args.hook}): {error}", file=sys.stderr)
+            if args.mode == "blocking":
+                raise SystemExit(2) from error
+            print(
+                "clean-code agent hook: scanning the full repository in advisory mode.",
+                file=sys.stderr,
+            )
     findings = [
         *eslint_findings(repo, timeout=args.timeout, files=changed),
         *ruff_findings(repo, timeout=args.timeout, files=changed),
