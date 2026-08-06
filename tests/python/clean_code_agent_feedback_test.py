@@ -7,7 +7,7 @@ import sys
 import tempfile
 import types
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -96,13 +96,80 @@ class CleanCodeAgentFeedbackTest(unittest.TestCase):
             finally:
                 hook.run = original_run
 
-    def test_changed_files_returns_empty_when_git_diff_fails(self) -> None:
+    def test_changed_files_raises_when_git_diff_fails(self) -> None:
         original_run = hook.run
-        hook.run = lambda *_args, **_kwargs: types.SimpleNamespace(returncode=1, stdout="")
+        hook.run = lambda *_args, **_kwargs: types.SimpleNamespace(
+            returncode=128,
+            stdout="",
+            stderr="fatal: bad revision 'missing'\n",
+        )
         try:
-            self.assertEqual(hook.changed_files(Path.cwd(), "missing"), [])
+            with self.assertRaisesRegex(hook.ChangedFilesError, "bad revision 'missing'"):
+                hook.changed_files(Path.cwd(), "missing")
         finally:
             hook.run = original_run
+
+    def test_main_invalid_changed_ref_fails_blocking_hook(self) -> None:
+        original_argv = sys.argv
+        original_repo_root = hook.repo_root
+        original_changed_files = hook.changed_files
+        original_ruff = hook.ruff_findings
+        ruff_findings = mock.Mock()
+        hook.repo_root = Path.cwd
+        hook.changed_files = lambda *_args: (_ for _ in ()).throw(
+            hook.ChangedFilesError("missing", "fatal: bad revision")
+        )
+        hook.ruff_findings = ruff_findings
+        sys.argv = ["hook", "--mode", "blocking", "--changed-since", "missing"]
+        stderr = StringIO()
+        try:
+            with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                hook.main()
+        finally:
+            sys.argv = original_argv
+            hook.repo_root = original_repo_root
+            hook.changed_files = original_changed_files
+            hook.ruff_findings = original_ruff
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("fatal: bad revision", stderr.getvalue())
+        ruff_findings.assert_not_called()
+
+    def test_main_invalid_changed_ref_advisory_scans_entire_repo(self) -> None:
+        original_argv = sys.argv
+        original_repo_root = hook.repo_root
+        original_changed_files = hook.changed_files
+        original_eslint = hook.eslint_findings
+        original_ruff = hook.ruff_findings
+        original_include_pylint = hook.include_pylint
+        observed: dict[str, object] = {}
+
+        def capture_files(_repo: Path, **kwargs: Any) -> list[object]:
+            observed["files"] = kwargs["files"]
+            return []
+
+        hook.repo_root = Path.cwd
+        hook.changed_files = lambda *_args: (_ for _ in ()).throw(
+            hook.ChangedFilesError("missing", "fatal: bad revision")
+        )
+        hook.eslint_findings = lambda *_args, **_kwargs: []
+        hook.ruff_findings = capture_files
+        hook.include_pylint = lambda: False
+        sys.argv = ["hook", "--mode", "advisory", "--changed-since", "missing"]
+        stderr = StringIO()
+        try:
+            with redirect_stderr(stderr):
+                hook.main()
+        finally:
+            sys.argv = original_argv
+            hook.repo_root = original_repo_root
+            hook.changed_files = original_changed_files
+            hook.eslint_findings = original_eslint
+            hook.ruff_findings = original_ruff
+            hook.include_pylint = original_include_pylint
+
+        self.assertIsNone(observed["files"])
+        self.assertIn("scanning the full repository", stderr.getvalue())
 
     def test_changed_file_commands_pass_only_matching_extensions(self) -> None:
         self.assertEqual(
