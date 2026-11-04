@@ -288,6 +288,11 @@ and can optionally be synced into the local sqlite-vec index.
 
 ## Shared MCP Runtime
 
+Agent installations use one local HTTP service at `http://127.0.0.1:8765/mcp`,
+shared across repositories and sessions. Agents connect directly without a
+per-session Python server or proxy. See [shared installation and migration](docs/shared-mcp-runtime.md)
+for setup, existing repo overrides, automatic startup, upgrades, and rollback.
+
 The installer installs the Python MCP runtime by default into
 `${CLEAN_CODE_TOOLS_HOME:-~/.clean-code-tools}`. The runtime, virtual
 environment, corpus, generated SQLite index, and other MCP state stay out of

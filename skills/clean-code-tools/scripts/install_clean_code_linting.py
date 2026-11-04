@@ -29,8 +29,8 @@ MCP_OWNERSHIP_MARKER = ".clean-code-tools-owned"
 MCP_OWNERSHIP_CONTENT = "managed by clean-code-tools\n"
 MCP_RUNTIME_PORT_ENV = "CLEAN_CODE_MCP_PORT"
 MAX_TCP_PORT = 65535
-MCP_RUNTIME_REQUIRED_MODULES = ("pydantic", "fastmcp", "fastembed", "sqlite_vec")
-MCP_RUNTIME_REQUIRED_PACKAGES = ("pydantic", "fastmcp", "fastembed", "sqlite-vec")
+MCP_RUNTIME_REQUIRED_MODULES = ("pydantic", "fastmcp", "fastembed", "sqlite_vec", "filelock")
+MCP_RUNTIME_REQUIRED_PACKAGES = ("pydantic", "fastmcp>=3.4.2", "fastembed", "sqlite-vec", "filelock>=3.29.0")
 HOOK_SOURCE = SKILL_ROOT / "hooks" / "clean_code_agent_feedback.py"
 HOOK_CATALOG_SOURCE = SKILL_ROOT / "catalog" / "clean_code_review_triggers.json"
 HOOK_SCRIPT_NAME = "clean_code_agent_feedback.py"
@@ -628,19 +628,15 @@ def plan_mcp_runtime(_repo: Path, plan: Plan, *, start: bool) -> None:
         ]
     )
     if start:
-        port = mcp_runtime_port(plan)
+        mcp_runtime_port(plan)
         plan.commands.append(
             PlannedCommand(
                 "start local clean-code MCP runtime",
                 [
                     str(venv_python),
-                    str(target / MCP_RUNTIME_DIR_NAME / "scripts" / "clean_code_mcp_server.py"),
-                    "--transport",
-                    "http",
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    str(port),
+                    str(target / MCP_RUNTIME_DIR_NAME / "scripts" / "start_shared_mcp.py"),
+                    "--home",
+                    str(target),
                 ],
                 "mcp-runtime",
                 target,
@@ -887,6 +883,14 @@ def has_commands(plan: Plan, category: str) -> bool:
 def apply_mcp_runtime(repo: Path) -> None:
     target = mcp_home()
     ensure_safe_mcp_home(target, repo=repo)
+    helper = target / MCP_RUNTIME_DIR_NAME / "scripts" / "start_shared_mcp.py"
+    if helper.is_file() and mcp_venv_python(target).is_file():
+        running = subprocess.run(
+            [str(mcp_venv_python(target)), str(helper), "--home", str(target), "--check"],
+            check=False, capture_output=True,
+        )
+        if running.returncode == 0:
+            raise SystemExit("Stop the shared clean-code service before updating its runtime.")
     target.mkdir(parents=True, exist_ok=True)
     (target / MCP_OWNERSHIP_MARKER).write_text(MCP_OWNERSHIP_CONTENT)
     for source in MCP_RUNTIME_FILES:

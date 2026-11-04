@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from filelock import FileLock
+
 from mcp_server import semantic
 
 
@@ -34,29 +36,31 @@ def upsert_clean_code_pattern_payload(
 ) -> dict[str, Any]:
     request = semantic.UpsertCustomPatternRequest.model_validate(payload)
     source = semantic.custom_patterns_path(request.custom_patterns_path)
-    source_existed = source.exists()
-    previous_patterns = semantic.load_custom_patterns(request.custom_patterns_path)
-    created, stored = semantic.upsert_custom_pattern(
-        request.pattern,
-        path=request.custom_patterns_path,
-    )
-    if request.sync_index:
-        try:
-            semantic.upsert_chunk(
-                chunk=semantic.custom_pattern_chunk(
-                    request.pattern,
+    source.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(source) + ".lock", timeout=30):
+        source_existed = source.exists()
+        previous_patterns = semantic.load_custom_patterns(request.custom_patterns_path)
+        created, stored = semantic.upsert_custom_pattern(
+            request.pattern,
+            path=request.custom_patterns_path,
+        )
+        if request.sync_index:
+            try:
+                semantic.upsert_chunk(
+                    chunk=semantic.custom_pattern_chunk(
+                        request.pattern,
+                        path=request.custom_patterns_path,
+                    ),
+                    index_path=request.index_path or semantic.DEFAULT_INDEX_PATH,
+                    model_name=request.model,
+                )
+            except Exception:
+                restore_custom_patterns(
+                    previous_patterns,
                     path=request.custom_patterns_path,
-                ),
-                index_path=request.index_path or semantic.DEFAULT_INDEX_PATH,
-                model_name=request.model,
-            )
-        except Exception:
-            restore_custom_patterns(
-                previous_patterns,
-                path=request.custom_patterns_path,
-                source_existed=source_existed,
-            )
-            raise
+                    source_existed=source_existed,
+                )
+                raise
     return {
         "pattern_id": request.pattern.id,
         "created": created,
@@ -82,34 +86,36 @@ def delete_custom_clean_code_pattern_payload(
             "index_path": index_path,
         }
     )
-    pattern = semantic.custom_pattern_by_id(
-        request.pattern_id,
-        path=request.custom_patterns_path,
-    )
     source = semantic.custom_patterns_path(request.custom_patterns_path)
-    source_existed = source.exists()
-    previous_patterns = semantic.load_custom_patterns(request.custom_patterns_path)
-    deleted = semantic.delete_custom_pattern(
-        request.pattern_id,
-        path=request.custom_patterns_path,
-    )
-    deleted_index = False
-    if request.sync_index and pattern is not None:
-        try:
-            deleted_index = semantic.delete_chunk(
-                chunk=semantic.custom_pattern_chunk(
-                    pattern,
+    source.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(source) + ".lock", timeout=30):
+        pattern = semantic.custom_pattern_by_id(
+            request.pattern_id,
+            path=request.custom_patterns_path,
+        )
+        source_existed = source.exists()
+        previous_patterns = semantic.load_custom_patterns(request.custom_patterns_path)
+        deleted = semantic.delete_custom_pattern(
+            request.pattern_id,
+            path=request.custom_patterns_path,
+        )
+        deleted_index = False
+        if request.sync_index and pattern is not None:
+            try:
+                deleted_index = semantic.delete_chunk(
+                    chunk=semantic.custom_pattern_chunk(
+                        pattern,
+                        path=request.custom_patterns_path,
+                    ),
+                    index_path=request.index_path or semantic.DEFAULT_INDEX_PATH,
+                )
+            except Exception:
+                restore_custom_patterns(
+                    previous_patterns,
                     path=request.custom_patterns_path,
-                ),
-                index_path=request.index_path or semantic.DEFAULT_INDEX_PATH,
-            )
-        except Exception:
-            restore_custom_patterns(
-                previous_patterns,
-                path=request.custom_patterns_path,
-                source_existed=source_existed,
-            )
-            raise
+                    source_existed=source_existed,
+                )
+                raise
     return {
         "pattern_id": request.pattern_id,
         "deleted": deleted,

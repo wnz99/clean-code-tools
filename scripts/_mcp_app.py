@@ -19,3 +19,7 @@ def load_semantic_module() -> ModuleType:
 
 def load_server_module() -> ModuleType:
     return importlib.import_module("mcp_server.server")
+
+
+def load_shared_runtime_module() -> ModuleType:
+    return importlib.import_module("mcp_server.shared_runtime")

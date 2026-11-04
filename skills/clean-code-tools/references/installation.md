@@ -17,6 +17,10 @@ python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent claude 
 Use `--from-main` to fetch the published `main` branch. Select only the agent
 the user uses. The installer registers the shared MCP runtime in
 `.codex/config.toml` or `.mcp.json` while preserving unrelated configuration.
+Connections use the shared HTTP URL `http://127.0.0.1:8765/mcp` directly,
+without a per-session Python process. The installer starts the service and
+reuses an identical installed runtime and index. It migrates its own managed
+Codex blocks; unmanaged entries require an explicit migration.
 Tell the user to restart the agent after installation.
 
 The default runtime home is `${CLEAN_CODE_TOOLS_HOME:-~/.clean-code-tools}`.
@@ -111,6 +115,34 @@ Git operations. Hook output remains a tripwire: inspect its code anchors and
 validate suggested MCP queries before reporting findings.
 
 ## Shared MCP runtime
+
+Codex entries use `url = "http://127.0.0.1:8765/mcp"`; Claude entries use
+`{"type":"http","url":"http://127.0.0.1:8765/mcp"}`. Replace old clean-code
+`command`, `args`, and `env` fields while preserving unrelated server entries.
+Check both global and repository settings because repo overrides take precedence.
+
+Start or reuse the installed service after a reboot with:
+
+```bash
+~/.clean-code-tools/.venv/bin/python ~/.clean-code-tools/runtime/scripts/start_shared_mcp.py
+```
+
+For automatic startup, have the OS service manager run the installed
+`clean_code_mcp_server.py --shared`, with the absolute `CLEAN_CODE_TOOLS_HOME`
+and that directory as its working directory. A lifetime lock prevents duplicate
+servers. Shared mode binds only to loopback, checks HTTP Host/Origin, and uses
+stateless MCP sessions. Startup errors never trigger private-server fallback.
+
+Stop the owning service before updating runtime files or rebuilding its index.
+The skill installer refuses to overwrite a healthy shared service. Preserve
+existing custom stores and indexes; restart after upgrading, then verify index
+info and pattern search. To roll back clients, restore their previous MCP
+entries and restart agents. Explicit stdio use remains supported.
+
+Custom patterns default to the shared runtime home. Use repo-specific pattern
+ID namespaces. Explicit paths resolve on the server and stay inside its allowed
+directories; do not broaden those directories to accommodate client-relative
+paths. Store locks cover writes, index synchronization, and rollback.
 
 The normal installer copies an isolated runtime and builds its SQLite vector
 index. Start it explicitly when requested:
