@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+from pathlib import Path
 
 from _mcp_app import load_semantic_module
 
@@ -20,6 +22,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build the local sqlite-vec clean-code index.")
     add_common_args(parser)
+    parser.add_argument("--shared-home", type=Path)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument(
         "--no-reset",
@@ -27,6 +30,16 @@ def main() -> None:
         help="Insert or update chunks without recreating the index file first.",
     )
     args = parser.parse_args()
+
+    if args.shared_home is not None:
+        from mcp_server.shared_runtime import (  # noqa: PLC0415
+            SharedRuntimeConfig,
+            migrate_custom_store,
+        )
+
+        config = SharedRuntimeConfig(home=args.shared_home)
+        os.environ.update(config.environment())
+        migrate_custom_store(config)
 
     if args.batch_size < 1:
         raise SystemExit(BATCH_SIZE_ERROR)

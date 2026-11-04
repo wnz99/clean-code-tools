@@ -37,9 +37,11 @@ lint = [
   "deptry>=0.25.1",
 ]
 mcp = [
+  "filelock>=3.29.0",
   "fastembed>=0.8.0",
-  "fastmcp>=2.0.0",
+  "fastmcp>=3.4.2",
   "sqlite-vec>=0.1.9",
+  "starlette>=0.40",
 ]
 typecheck = [
   "pyright>=1.1.403",
@@ -270,6 +272,8 @@ DEP004 = [
   "fastmcp",
   "sqlite_vec",
   "sqlite-vec",
+  "filelock",
+  "starlette",
 ]
 
 [tool.pylint.main]

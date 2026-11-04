@@ -37,12 +37,16 @@ class InstallCodexSkillTest(unittest.TestCase):
     def test_default_dest_root_uses_project_codex_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp).resolve()
-            self.assertEqual(installer.default_dest_root("codex", project), project / ".codex" / "skills")
+            self.assertEqual(
+                installer.default_dest_root("codex", project), project / ".codex" / "skills"
+            )
 
     def test_default_dest_root_supports_project_local_claude(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp).resolve()
-            self.assertEqual(installer.default_dest_root("claude", project), project / ".claude" / "skills")
+            self.assertEqual(
+                installer.default_dest_root("claude", project), project / ".claude" / "skills"
+            )
 
     def test_install_copies_skill_and_ignores_bytecode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -192,6 +196,70 @@ class InstallCodexSkillTest(unittest.TestCase):
             with mock.patch.dict(os.environ, {"CLEAN_CODE_TOOLS_HOME": str(configured)}):
                 self.assertEqual(installer.shared_mcp_home(), configured)
 
+    def test_identical_runtime_is_reused_without_rebuilding_index(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skill, home = root / "skill", root / "home"
+            (skill / "runtime").mkdir(parents=True)
+            (home / "runtime").mkdir(parents=True)
+            for parent in [skill, home]:
+                (parent / "runtime/server.py").write_text("server\n")
+            (home / "clean-code-index.sqlite").write_bytes(b"existing index")
+            with (
+                mock.patch.object(installer, "shared_mcp_home", return_value=home),
+                mock.patch.object(installer, "run") as run,
+            ):
+                installer.install_mcp_runtime(skill, root)
+            run.assert_not_called()
+
+    def test_upgrade_refuses_to_overwrite_running_shared_service(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            helper = home / "runtime/scripts/start_shared_mcp.py"
+            helper.parent.mkdir(parents=True)
+            helper.write_text("helper\n")
+            with (
+                mock.patch.object(installer, "shared_mcp_home", return_value=home),
+                mock.patch.object(
+                    installer.subprocess, "run", return_value=mock.Mock(returncode=0)
+                ),
+                mock.patch.object(installer, "run") as run,
+            ):
+                with self.assertRaisesRegex(installer.InstallError, "Stop the shared"):
+                    installer.install_mcp_runtime(root / "skill", root)
+            run.assert_not_called()
+
+    def test_stopped_service_can_be_upgraded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            helper = root / "home/runtime/scripts/start_shared_mcp.py"
+            helper.parent.mkdir(parents=True)
+            helper.write_text("helper\n")
+            with (
+                mock.patch.object(installer, "shared_mcp_home", return_value=root / "home"),
+                mock.patch.object(
+                    installer.subprocess, "run", return_value=mock.Mock(returncode=1)
+                ),
+                mock.patch.object(installer, "run") as run,
+            ):
+                installer.install_mcp_runtime(root / "skill", root)
+            run.assert_called_once()
+
+    def test_start_uses_explicit_home_and_port_registration_is_validated(self) -> None:
+        with mock.patch.object(installer, "run") as run:
+            installer.start_shared_runtime(Path("/runtime"))
+        self.assertEqual(run.call_args.args[0][-2:], ["--home", "/runtime"])
+        with mock.patch.dict(os.environ, {"CLEAN_CODE_MCP_PORT": "12345"}):
+            self.assertEqual(
+                installer.mcp_server_config(Path("/runtime")).url, "http://127.0.0.1:12345/mcp"
+            )
+        with (
+            mock.patch.dict(os.environ, {"CLEAN_CODE_MCP_PORT": "0"}),
+            self.assertRaises(ValueError),
+        ):
+            installer.mcp_server_config(Path("/runtime"))
+
     def test_launcher_requirements_include_allowed_base_and_index(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp).resolve() / "runtime-home"
@@ -226,8 +294,9 @@ class InstallCodexSkillTest(unittest.TestCase):
             parsed = tomllib.loads(config_path.read_text())
             self.assertEqual(parsed["model"], "gpt-test")
             server = parsed["mcp_servers"]["clean-code-tools"]
-            self.assertEqual(server["command"], str(installer.runtime_python(second_home)))
-            self.assertEqual(server["env"]["CLEAN_CODE_INDEX_BASE"], str(second_home))
+            self.assertEqual(server["url"], "http://127.0.0.1:8765/mcp")
+            self.assertNotIn("command", server)
+            self.assertNotIn("env", server)
             self.assertEqual(config_path.read_text().count(installer.CODEX_MCP_START), 1)
 
     def test_register_codex_mcp_refuses_unmanaged_server(self) -> None:
@@ -252,17 +321,16 @@ class InstallCodexSkillTest(unittest.TestCase):
             )
             home = project / "runtime-home"
 
-            result = installer.register_mcp_launcher(
-                agent="claude", project=project, home=home
-            )
+            result = installer.register_mcp_launcher(agent="claude", project=project, home=home)
 
             self.assertEqual(result, config_path)
             parsed = json.loads(config_path.read_text())
             self.assertEqual(parsed["mcpServers"]["remote"]["url"], "https://example.test/mcp")
             self.assertTrue(parsed["customSetting"])
             server = parsed["mcpServers"]["clean-code-tools"]
-            self.assertEqual(server["command"], str(installer.runtime_python(home)))
-            self.assertEqual(server["env"]["CLEAN_CODE_INDEX_BASE"], str(home))
+            self.assertEqual(server["url"], "http://127.0.0.1:8765/mcp")
+            self.assertEqual(server["type"], "http")
+            self.assertNotIn("command", server)
 
     def test_runtime_python_uses_windows_layout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -306,7 +374,9 @@ class InstallCodexSkillTest(unittest.TestCase):
             run_git(remote, "config", "user.name", "Test User")
             skill = remote / "skills" / "clean-code-tools"
             skill.mkdir(parents=True)
-            (skill / "SKILL.md").write_text("---\nname: clean-code-tools\ndescription: from main\n---\n")
+            (skill / "SKILL.md").write_text(
+                "---\nname: clean-code-tools\ndescription: from main\n---\n"
+            )
             run_git(remote, "add", "skills")
             run_git(remote, "commit", "-m", "skill")
 
@@ -360,6 +430,7 @@ class InstallCodexSkillTest(unittest.TestCase):
                     ],
                 ),
                 mock.patch.object(installer, "install_mcp_runtime"),
+                mock.patch.object(installer, "start_shared_runtime"),
                 mock.patch.object(installer, "shared_mcp_home", return_value=home),
                 mock.patch.object(
                     installer, "register_mcp_launcher", return_value=launcher

@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import concurrent.futures
 import importlib.util
 import json
+import os
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest import mock
+
+from filelock import FileLock, Timeout
 
 MODULE_PATH = (
     Path(__file__).resolve().parents[2]
@@ -38,6 +44,91 @@ def run_git(repo: Path, *args: str) -> None:
 
 
 class CleanCodeInstallerTest(unittest.TestCase):
+    def test_running_service_on_nondefault_port_blocks_actual_update(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = root / "project"
+            repo.mkdir()
+            home = root / "home"
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                port = listener.getsockname()[1]
+            environment = {**os.environ, installer.MCP_HOME_ENV: str(home)}
+            with mock.patch.dict(os.environ, environment):
+                installer.apply_mcp_runtime(repo)
+            script = home / "runtime/scripts/clean_code_mcp_server.py"
+            process = subprocess.Popen(
+                [sys.executable, str(script), "--shared"],
+                env={**environment, "CLEAN_CODE_MCP_PORT": str(port)},
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            try:
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    self.assertIsNone(process.poll())
+                    try:
+                        with FileLock(str(home / "shared-server.lock"), timeout=0):
+                            pass
+                    except Timeout:
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail("service did not acquire lifetime ownership")
+                plan = installer.Plan(repo=repo, git_root=repo)
+                plan.changes.append(installer.Change("runtime", "update"))
+                options = installer.ApplyOptions(
+                    wants_mcp_runtime=True, hook_choice="none", hook_mode="advisory",
+                    assume_yes=True, skip_install=True, create_backup=False,
+                )
+                with (
+                    mock.patch.dict(os.environ, {**environment, "CLEAN_CODE_MCP_PORT": "8765"}),
+                    self.assertRaisesRegex(SystemExit, "Stop the shared"),
+                ):
+                    installer.apply_requested_setup(plan, options)
+            finally:
+                process.terminate()
+                process.wait(timeout=10)
+
+    def test_runtime_update_holds_both_locks_through_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = root / "project"
+            repo.mkdir()
+            home = root / "home"
+            plan = installer.Plan(repo=repo, git_root=repo)
+            plan.changes.append(installer.Change("runtime", "upgrade"))
+            options = installer.ApplyOptions(
+                wants_mcp_runtime=True, hook_choice="none", hook_mode="advisory",
+                assume_yes=True, skip_install=True, create_backup=False,
+            )
+
+            def check_locks(*_args, **_kwargs):
+                for name in ("shared-start.lock", "shared-server.lock"):
+                    def contender(lock_name=name):
+                        with FileLock(str(home / lock_name), timeout=0):
+                            self.fail("update released ownership before indexing finished")
+                    with (
+                        concurrent.futures.ThreadPoolExecutor() as pool,
+                        self.assertRaises(Timeout),
+                    ):
+                        pool.submit(contender).result()
+
+            with (
+                mock.patch.dict(installer.os.environ, {installer.MCP_HOME_ENV: str(home)}),
+                mock.patch.object(installer, "run_planned_commands", side_effect=check_locks),
+            ):
+                installer.apply_requested_setup(plan, options)
+                for name in ("shared-start.lock", "shared-server.lock"):
+                    with FileLock(str(home / name), timeout=0):
+                        pass
+                # Lifetime ownership is home-based even when the service port differs.
+                with (
+                    FileLock(str(home / "shared-server.lock"), timeout=0),
+                    mock.patch.dict(installer.os.environ, {"CLEAN_CODE_MCP_PORT": "18766"}),
+                    self.assertRaisesRegex(SystemExit, "Stop the shared"),
+                ):
+                    installer.apply_requested_setup(plan, options)
+
     def test_run_raises_command_output_on_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(SystemExit) as raised:
@@ -65,7 +156,10 @@ class CleanCodeInstallerTest(unittest.TestCase):
 
             self.assertEqual(installer.git_root_for(repo), repo)
             self.assertFalse(installer.is_git_dirty(repo))
-            self.assertEqual(installer.create_rollback_point(repo), ["No Git repository found; no rollback point was created."])
+            self.assertEqual(
+                installer.create_rollback_point(repo),
+                ["No Git repository found; no rollback point was created."],
+            )
             self.assertIsNone(installer.package_manager_root(repo, ("package.json",)))
 
     def test_package_manager_and_json_detection_branches(self) -> None:
@@ -89,8 +183,13 @@ class CleanCodeInstallerTest(unittest.TestCase):
                 (repo / lockfile).write_text("")
                 self.assertEqual(installer.detect_js_package_manager(repo), manager)
 
-            self.assertEqual(installer.js_install_command("bun", workspace_root=False)[:3], ["bun", "add", "-d"])
-            self.assertEqual(installer.js_install_command("yarn", workspace_root=False)[:3], ["yarn", "add", "-D"])
+            self.assertEqual(
+                installer.js_install_command("bun", workspace_root=False)[:3], ["bun", "add", "-d"]
+            )
+            self.assertEqual(
+                installer.js_install_command("yarn", workspace_root=False)[:3],
+                ["yarn", "add", "-D"],
+            )
             self.assertIn("-w", installer.js_install_command("pnpm", workspace_root=True))
 
     def test_python_install_detection_branches(self) -> None:
@@ -102,15 +201,21 @@ class CleanCodeInstallerTest(unittest.TestCase):
             (repo / "main.py").unlink()
             (repo / "poetry.lock").write_text("")
             with mock.patch.object(installer.shutil, "which", return_value=None):
-                self.assertEqual(installer.detect_python_install_command(repo)[:2], ["poetry", "add"])
+                self.assertEqual(
+                    installer.detect_python_install_command(repo)[:2], ["poetry", "add"]
+                )
             (repo / "poetry.lock").unlink()
             (repo / "requirements-dev.txt").write_text("")
             with mock.patch.object(installer.shutil, "which", return_value=None):
-                self.assertEqual(installer.detect_python_install_command(repo)[:3], [sys.executable, "-m", "pip"])
+                self.assertEqual(
+                    installer.detect_python_install_command(repo)[:3], [sys.executable, "-m", "pip"]
+                )
             (repo / "requirements-dev.txt").unlink()
             (repo / "pyproject.toml").write_text("[project]\n")
             with mock.patch.object(installer.shutil, "which", return_value=None):
-                self.assertEqual(installer.detect_python_install_command(repo)[:3], [sys.executable, "-m", "pip"])
+                self.assertEqual(
+                    installer.detect_python_install_command(repo)[:3], [sys.executable, "-m", "pip"]
+                )
             (repo / "pyproject.toml").unlink()
             with mock.patch.object(installer.shutil, "which", return_value=None):
                 self.assertIsNone(installer.detect_python_install_command(repo))
@@ -122,9 +227,17 @@ class CleanCodeInstallerTest(unittest.TestCase):
             (repo / "package-lock.json").write_text("{}\n")
 
             cases = [
-                ("eslint.config.mjs", 'import cleanCode from "clean-code-tools/configs/eslint.clean-code.recommended.mjs";\nexport default cleanCode;\n', "eslint already configured"),
+                (
+                    "eslint.config.mjs",
+                    'import cleanCode from "clean-code-tools/configs/eslint.clean-code.recommended.mjs";\nexport default cleanCode;\n',
+                    "eslint already configured",
+                ),
                 ("eslint.config.cjs", "module.exports = [];\n", "CommonJS"),
-                ("eslint.config.mjs", "export default [js.configs.recommended];\n", "modify eslint.config.mjs"),
+                (
+                    "eslint.config.mjs",
+                    "export default [js.configs.recommended];\n",
+                    "modify eslint.config.mjs",
+                ),
                 ("eslint.config.mjs", "export default defineConfig([]);\n", "not a simple"),
             ]
             for filename, content, expected in cases:
@@ -149,7 +262,9 @@ class CleanCodeInstallerTest(unittest.TestCase):
             repo = Path(tmp).resolve()
             (repo / "package.json").write_text(json.dumps({"scripts": {"lint": "eslint ."}}))
             (repo / "package-lock.json").write_text("{}\n")
-            (repo / ".fallowrc.jsonc").write_text('{\n  // project-specific fallow config\n  "ignorePatterns": []\n}\n')
+            (repo / ".fallowrc.jsonc").write_text(
+                '{\n  // project-specific fallow config\n  "ignorePatterns": []\n}\n'
+            )
 
             with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/npm"):
                 plan = installer.Plan(repo=repo, git_root=repo)
@@ -186,10 +301,14 @@ class CleanCodeInstallerTest(unittest.TestCase):
             self.assertIn("append pyproject.toml deptry section", labels)
             self.assertIn("append pyproject.toml lint sections", labels)
 
-            (repo / "pyproject.toml").write_text("[tool.deptry]\nclean_code_tools_pylint\nclean-code-todo-format\n")
+            (repo / "pyproject.toml").write_text(
+                "[tool.deptry]\nclean_code_tools_pylint\nclean-code-todo-format\n"
+            )
             plan = installer.Plan(repo=repo, git_root=repo)
             installer.plan_python(repo, plan)
-            self.assertIn("python lint already configured", [change.label for change in plan.changes])
+            self.assertIn(
+                "python lint already configured", [change.label for change in plan.changes]
+            )
 
     def test_verification_runtime_and_hook_planning_branches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -214,12 +333,18 @@ class CleanCodeInstallerTest(unittest.TestCase):
                 self.assertTrue(installer.has_commands(plan, "mcp-install"))
                 start_plan = installer.Plan(repo=repo, git_root=repo)
                 installer.plan_mcp_runtime(repo, start_plan, start=True)
-            self.assertEqual(start_plan.commands[-1].command[-1], "9999")
+            self.assertEqual(start_plan.commands[-1].command[-2:], ["--home", str(runtime_home)])
+            self.assertIn("start_shared_mcp.py", start_plan.commands[-1].command[1])
 
             self.assertEqual(installer.selected_hooks("both"), ("pre-commit", "pre-push"))
             self.assertEqual(installer.selected_hooks("none"), ())
-            self.assertIn("default", installer.describe_hook_selection("ask", apply=True, assume_yes=False))
-            self.assertIn("none selected", installer.describe_hook_selection("none", apply=True, assume_yes=True))
+            self.assertIn(
+                "default", installer.describe_hook_selection("ask", apply=True, assume_yes=False)
+            )
+            self.assertIn(
+                "none selected",
+                installer.describe_hook_selection("none", apply=True, assume_yes=True),
+            )
             self.assertEqual(
                 installer.describe_hook_selection("pre-push", apply=False, assume_yes=False),
                 "pre-push in advisory mode",
@@ -262,7 +387,9 @@ class CleanCodeInstallerTest(unittest.TestCase):
             pre_push_text = (hooks_dir / "pre-push").read_text()
             self.assertIn("--mode", pre_push_text)
             self.assertIn("--changed-since", pre_push_text)
-            self.assertNotIn("--changed-since", installer.hook_wrapper("pre-commit", mode="advisory"))
+            self.assertNotIn(
+                "--changed-since", installer.hook_wrapper("pre-commit", mode="advisory")
+            )
             self.assertTrue((hooks_dir / installer.HOOK_SCRIPT_NAME).exists())
 
     def test_apply_config_helpers_write_expected_files(self) -> None:
@@ -295,7 +422,9 @@ class CleanCodeInstallerTest(unittest.TestCase):
 
             installer.apply_python(no_package)
             self.assertTrue((no_package / "pyproject.toml").exists())
-            (no_package / "pyproject.toml").write_text("clean_code_tools_pylint\nclean-code-todo-format\n")
+            (no_package / "pyproject.toml").write_text(
+                "clean_code_tools_pylint\nclean-code-todo-format\n"
+            )
             installer.apply_python(no_package)
             self.assertIn("[tool.deptry]", (no_package / "pyproject.toml").read_text())
             self.assertEqual(installer.ensure_deptry_config("[tool.deptry]\n"), "[tool.deptry]\n")
@@ -311,9 +440,15 @@ class CleanCodeInstallerTest(unittest.TestCase):
             plan.languages.append("javascript/typescript")
             with mock.patch.object(installer, "confirm", return_value=False):
                 installer.apply_lint_config_if_approved(plan, assume_yes=False, summary=summary)
-                installer.apply_runtime_if_approved(repo, wants_mcp_runtime=True, assume_yes=False, summary=summary)
-                installer.apply_hooks_if_approved(repo, hook_choice="pre-push", mode="advisory", assume_yes=False, summary=summary)
-                installer.install_packages_if_approved(plan, skip_install=False, assume_yes=False, summary=summary)
+                installer.apply_runtime_if_approved(
+                    repo, wants_mcp_runtime=True, assume_yes=False, summary=summary
+                )
+                installer.apply_hooks_if_approved(
+                    repo, hook_choice="pre-push", mode="advisory", assume_yes=False, summary=summary
+                )
+                installer.install_packages_if_approved(
+                    plan, skip_install=False, assume_yes=False, summary=summary
+                )
             self.assertTrue(any("approval declined" in item for item in summary.skipped))
 
             command = installer.PlannedCommand("echo", ["echo", "ok"], "dependency-install", repo)
@@ -335,7 +470,9 @@ class CleanCodeInstallerTest(unittest.TestCase):
             plan = installer.Plan(repo=repo, git_root=repo)
             plan.commands.extend(
                 [
-                    installer.PlannedCommand("install", ["echo", "install"], "dependency-install", repo),
+                    installer.PlannedCommand(
+                        "install", ["echo", "install"], "dependency-install", repo
+                    ),
                     installer.PlannedCommand("start", ["echo", "start"], "mcp-runtime", repo),
                 ]
             )
@@ -346,9 +483,15 @@ class CleanCodeInstallerTest(unittest.TestCase):
                 mock.patch.object(installer, "apply_git_hooks") as hooks_mock,
                 mock.patch.object(installer, "run_planned_commands") as commands_mock,
             ):
-                installer.apply_runtime_if_approved(repo, wants_mcp_runtime=True, assume_yes=False, summary=summary)
-                installer.apply_hooks_if_approved(repo, hook_choice="pre-push", mode="advisory", assume_yes=False, summary=summary)
-                installer.install_packages_if_approved(plan, skip_install=False, assume_yes=False, summary=summary)
+                installer.apply_runtime_if_approved(
+                    repo, wants_mcp_runtime=True, assume_yes=False, summary=summary
+                )
+                installer.apply_hooks_if_approved(
+                    repo, hook_choice="pre-push", mode="advisory", assume_yes=False, summary=summary
+                )
+                installer.install_packages_if_approved(
+                    plan, skip_install=False, assume_yes=False, summary=summary
+                )
                 installer.start_runtime_if_approved(plan, assume_yes=False, summary=summary)
 
             runtime_mock.assert_called_once_with(repo)
@@ -464,7 +607,10 @@ class CleanCodeInstallerTest(unittest.TestCase):
         with mock.patch.object(installer.sys, "stdin") as stdin:
             stdin.isatty.return_value = False
             self.assertFalse(installer.confirm("x", assume_yes=False))
-        with mock.patch.object(installer.sys, "stdin") as stdin, mock.patch("builtins.input", return_value="yes"):
+        with (
+            mock.patch.object(installer.sys, "stdin") as stdin,
+            mock.patch("builtins.input", return_value="yes"),
+        ):
             stdin.isatty.return_value = True
             self.assertTrue(installer.confirm("x", assume_yes=False))
         args = installer.parser().parse_args(["--git-hooks", "both", "--git-hook-mode", "blocking"])
@@ -484,9 +630,13 @@ class CleanCodeInstallerTest(unittest.TestCase):
             self.assertFalse((repo / ".clean-code-mcp").exists())
             stale_file = runtime / "runtime" / "stale.py"
             stale_file.write_text("obsolete")
+            custom_store = runtime / "runtime" / "stores" / "team.jsonl"
+            custom_store.parent.mkdir()
+            custom_store.write_text('{"user": "preserved"}\n')
             with mock.patch.dict(installer.os.environ, {installer.MCP_HOME_ENV: str(runtime)}):
                 installer.apply_mcp_runtime(repo)
-            self.assertFalse(stale_file.exists())
+            self.assertTrue(stale_file.exists())
+            self.assertEqual(custom_store.read_text(), '{"user": "preserved"}\n')
 
             runtime_python = runtime / "runtime" / "src" / "python"
             check_cache = """
@@ -560,7 +710,6 @@ assert custom_patterns.DEFAULT_CUSTOM_PATTERN_RECORDS == (
             self.assertEqual(protected.read_text(), "keep")
             self.assertFalse((runtime / installer.MCP_OWNERSHIP_MARKER).exists())
 
-
     def test_nested_package_uses_ancestor_pnpm_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp).resolve()
@@ -630,7 +779,12 @@ assert custom_patterns.DEFAULT_CUSTOM_PATTERN_RECORDS == (
                 hook_choice="ask",
             )
 
-            self.assertTrue(any("--apply --yes requires an explicit hook decision" in blocker for blocker in plan.blockers))
+            self.assertTrue(
+                any(
+                    "--apply --yes requires an explicit hook decision" in blocker
+                    for blocker in plan.blockers
+                )
+            )
             self.assertIn(
                 "unresolved",
                 installer.describe_hook_selection("ask", apply=True, assume_yes=True),

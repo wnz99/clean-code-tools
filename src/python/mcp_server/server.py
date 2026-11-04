@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
 import json
 from typing import Any
 
@@ -24,6 +23,7 @@ from mcp_server.server_payloads import (
     lint_rule_recommendation,
     search_result,
 )
+from mcp_server.shared_runtime import parse_server_args, register_shared_health, serve_shared
 
 DEFAULT_EMBEDDING_MODEL = semantic.DEFAULT_EMBEDDING_MODEL
 DEFAULT_INDEX_PATH = semantic.DEFAULT_INDEX_PATH
@@ -43,6 +43,7 @@ except ImportError as exc:  # pragma: no cover - exercised by CLI users without 
 
 
 mcp = FastMCP("clean-code-tools")
+register_shared_health(mcp)
 
 
 @mcp.resource("clean-code://corpus/summary")
@@ -214,7 +215,10 @@ def recommend_clean_code_lint_rules(
         "query": request.query,
         "language": request.language,
         "targets": requested_targets,
-        "results": [lint_rule_recommendation(result, requested_targets) for result in search_payload["results"]],
+        "results": [
+            lint_rule_recommendation(result, requested_targets)
+            for result in search_payload["results"]
+        ],
         "no_strong_match": search_payload["no_strong_match"],
     }
 
@@ -275,21 +279,11 @@ def delete_custom_clean_code_pattern(
     )
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the clean-code FastMCP server.")
-    parser.add_argument(
-        "--transport",
-        choices=("stdio", "http", "sse"),
-        default="stdio",
-        help="FastMCP transport to run.",
-    )
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
-    return parser.parse_args()
-
-
 def main() -> None:
-    args = parse_args()
+    args = parse_server_args()
+    if args.shared:
+        serve_shared(mcp)
+        return
     if args.transport == "stdio":
         mcp.run()
         return

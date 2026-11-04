@@ -17,9 +17,36 @@ python3 /path/to/clean-code-tools/scripts/install_codex_skill.py --agent claude 
 Use `--from-main` to fetch the published `main` branch. Select only the agent
 the user uses. The installer registers the shared MCP runtime in
 `.codex/config.toml` or `.mcp.json` while preserving unrelated configuration.
+Connections use the shared HTTP URL `http://127.0.0.1:8765/mcp` directly,
+without a per-session Python process. The installer starts the service and
+reuses an identical installed runtime and index. It migrates its own managed
+Codex blocks; unmanaged entries require an explicit migration.
 Tell the user to restart the agent after installation.
 
 The default runtime home is `${CLEAN_CODE_TOOLS_HOME:-~/.clean-code-tools}`.
+The installer Python requires `filelock` for exclusive runtime updates. Updates
+hold the startup and lifetime locks through copying, dependencies, and indexing;
+stop any service using that home first, including services on a custom port.
+Updates preserve existing custom index entries and runtime-local stores. Legacy
+`runtime/data` records merge into `data`; conflicting IDs stop ingestion without
+overwriting either store. Resolve the conflict and rerun installation.
+Successful migration archives the consumed legacy file as
+`runtime/data/custom-clean-code-patterns.jsonl.migrated`. Later upgrades use the
+current store, so shared-tool edits and deletions persist. If the legacy default
+reappears, installation stops: compare it with the archive and current store,
+apply intended changes through the shared tools, and move the recreated file
+outside the old default path. Keep the archive as a recovery backup, not an
+active store.
+On a clean machine, provide installer dependencies without changing system Python:
+
+```bash
+uv run --with pydantic --with 'filelock>=3.29.0' python /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex --replace
+uv run --with 'filelock>=3.29.0' python /path/to/clean-code-tools/scripts/install_clean_code_linting.py
+```
+
+Use the same `uv run --with` prefix for the apply commands below when those
+dependencies are absent from your selected Python environment. Store migration
+runs later in the isolated runtime environment, after its dependencies install.
 Runtime files, dependencies, indexes, and logs stay outside the target project.
 After restart, call `clean_code_index_info`, then make a narrow
 `search_clean_code_patterns` query. Installation is complete only when both
@@ -111,6 +138,34 @@ Git operations. Hook output remains a tripwire: inspect its code anchors and
 validate suggested MCP queries before reporting findings.
 
 ## Shared MCP runtime
+
+Codex entries use `url = "http://127.0.0.1:8765/mcp"`; Claude entries use
+`{"type":"http","url":"http://127.0.0.1:8765/mcp"}`. Replace old clean-code
+`command`, `args`, and `env` fields while preserving unrelated server entries.
+Check both global and repository settings because repo overrides take precedence.
+
+Start or reuse the installed service after a reboot with:
+
+```bash
+~/.clean-code-tools/.venv/bin/python ~/.clean-code-tools/runtime/scripts/start_shared_mcp.py
+```
+
+For automatic startup, have the OS service manager run the installed
+`clean_code_mcp_server.py --shared`, with the absolute `CLEAN_CODE_TOOLS_HOME`
+and that directory as its working directory. A lifetime lock prevents duplicate
+servers. Shared mode binds only to loopback, checks HTTP Host/Origin, and uses
+stateless MCP sessions. Startup errors never trigger private-server fallback.
+
+Stop the owning service before updating runtime files or rebuilding its index.
+The skill installer refuses to overwrite a healthy shared service. Preserve
+existing custom stores and indexes; restart after upgrading, then verify index
+info and pattern search. To roll back clients, restore their previous MCP
+entries and restart agents. Explicit stdio use remains supported.
+
+Custom patterns default to the shared runtime home. Use repo-specific pattern
+ID namespaces. Explicit paths resolve on the server and stay inside its allowed
+directories; do not broaden those directories to accommodate client-relative
+paths. Store locks cover writes, index synchronization, and rollback.
 
 The normal installer copies an isolated runtime and builds its SQLite vector
 index. Start it explicitly when requested:

@@ -31,7 +31,11 @@ HTTP:
 bun run mcp:http
 ```
 
-The HTTP server defaults to `http://127.0.0.1:8765`.
+The MCP HTTP endpoint defaults to `http://127.0.0.1:8765/mcp`.
+
+Installed agents share one HTTP runtime through direct URL connections.
+See [shared installation and migration](shared-mcp-runtime.md) for setup,
+repo overrides, automatic startup, upgrades, and rollback.
 
 Search tools are read-only: build the sqlite-vec index with
 `bun run semantic:ingest` before calling them.

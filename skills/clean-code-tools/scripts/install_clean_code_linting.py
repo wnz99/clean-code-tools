@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from filelock import FileLock, Timeout
+
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 PYTHON_TEMPLATE = SKILL_ROOT / "templates" / "python.clean-code.pyproject.toml"
 KNIP_CONFIG_NAME = "knip.json"
@@ -29,8 +31,8 @@ MCP_OWNERSHIP_MARKER = ".clean-code-tools-owned"
 MCP_OWNERSHIP_CONTENT = "managed by clean-code-tools\n"
 MCP_RUNTIME_PORT_ENV = "CLEAN_CODE_MCP_PORT"
 MAX_TCP_PORT = 65535
-MCP_RUNTIME_REQUIRED_MODULES = ("pydantic", "fastmcp", "fastembed", "sqlite_vec")
-MCP_RUNTIME_REQUIRED_PACKAGES = ("pydantic", "fastmcp", "fastembed", "sqlite-vec")
+MCP_RUNTIME_REQUIRED_MODULES = ("pydantic", "fastmcp", "fastembed", "sqlite_vec", "filelock")
+MCP_RUNTIME_REQUIRED_PACKAGES = ("pydantic", "fastmcp>=3.4.2", "fastembed", "sqlite-vec", "filelock>=3.29.0")
 HOOK_SOURCE = SKILL_ROOT / "hooks" / "clean_code_agent_feedback.py"
 HOOK_CATALOG_SOURCE = SKILL_ROOT / "catalog" / "clean_code_review_triggers.json"
 HOOK_SCRIPT_NAME = "clean_code_agent_feedback.py"
@@ -621,6 +623,9 @@ def plan_mcp_runtime(_repo: Path, plan: Plan, *, start: bool) -> None:
                     str(target / MCP_RUNTIME_DIR_NAME / "scripts" / "sqlite_vec_ingest_clean_code.py"),
                     "--index-path",
                     str(target / MCP_INDEX_NAME),
+                    "--no-reset",
+                    "--shared-home",
+                    str(target),
                 ],
                 "mcp-install",
                 target,
@@ -628,19 +633,15 @@ def plan_mcp_runtime(_repo: Path, plan: Plan, *, start: bool) -> None:
         ]
     )
     if start:
-        port = mcp_runtime_port(plan)
+        mcp_runtime_port(plan)
         plan.commands.append(
             PlannedCommand(
                 "start local clean-code MCP runtime",
                 [
                     str(venv_python),
-                    str(target / MCP_RUNTIME_DIR_NAME / "scripts" / "clean_code_mcp_server.py"),
-                    "--transport",
-                    "http",
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    str(port),
+                    str(target / MCP_RUNTIME_DIR_NAME / "scripts" / "start_shared_mcp.py"),
+                    "--home",
+                    str(target),
                 ],
                 "mcp-runtime",
                 target,
@@ -887,13 +888,21 @@ def has_commands(plan: Plan, category: str) -> bool:
 def apply_mcp_runtime(repo: Path) -> None:
     target = mcp_home()
     ensure_safe_mcp_home(target, repo=repo)
+    helper = target / MCP_RUNTIME_DIR_NAME / "scripts" / "start_shared_mcp.py"
+    if helper.is_file() and mcp_venv_python(target).is_file():
+        running = subprocess.run(
+            [str(mcp_venv_python(target)), str(helper), "--home", str(target), "--check"],
+            check=False, capture_output=True,
+        )
+        if running.returncode == 0:
+            raise SystemExit("Stop the shared clean-code service before updating its runtime.")
     target.mkdir(parents=True, exist_ok=True)
     (target / MCP_OWNERSHIP_MARKER).write_text(MCP_OWNERSHIP_CONTENT)
     for source in MCP_RUNTIME_FILES:
         destination = target / MCP_RUNTIME_DIR_NAME
         if source.is_dir():
-            if destination.exists():
-                shutil.rmtree(destination)
+            # Runtime-local stores may live anywhere in this tree. Overlay code
+            # without deleting user files (including old default data stores).
             shutil.copytree(source, destination, dirs_exist_ok=True)
         else:
             shutil.copy2(source, destination)
@@ -1171,15 +1180,28 @@ def apply_requested_setup(plan: Plan, options: ApplyOptions) -> None:
     else:
         summary.mark_skipped("rollback point", "--no-backup was passed")
     apply_lint_config_if_approved(plan, assume_yes=options.assume_yes, summary=summary)
-    runtime_applied = apply_runtime_if_approved(
-        plan.repo,
-        wants_mcp_runtime=options.wants_mcp_runtime,
-        assume_yes=options.assume_yes,
-        summary=summary,
-    )
-    if runtime_applied:
-        run_planned_commands(plan, category="mcp-install")
-        summary.mark_applied("MCP dependencies and populated search index")
+    if options.wants_mcp_runtime:
+        target = mcp_home()
+        ensure_safe_mcp_home(target, repo=plan.repo)
+        target.mkdir(parents=True, exist_ok=True)
+        # Claim the empty home before creating lock files inside it.
+        (target / MCP_OWNERSHIP_MARKER).write_text(MCP_OWNERSHIP_CONTENT)
+        try:
+            with (
+                FileLock(str(target / "shared-start.lock"), timeout=0),
+                FileLock(str(target / "shared-server.lock"), timeout=0),
+            ):
+                runtime_applied = apply_runtime_if_approved(
+                    plan.repo, wants_mcp_runtime=True,
+                    assume_yes=options.assume_yes, summary=summary,
+                )
+                if runtime_applied:
+                    run_planned_commands(plan, category="mcp-install")
+                    summary.mark_applied("MCP dependencies and populated search index")
+        except Timeout as error:
+            raise SystemExit("Stop the shared clean-code service before updating its runtime.") from error
+    else:
+        summary.mark_skipped("MCP runtime", "not requested")
     apply_hooks_if_approved(
         plan.repo,
         hook_choice=options.hook_choice,

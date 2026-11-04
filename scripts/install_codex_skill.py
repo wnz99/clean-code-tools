@@ -11,9 +11,9 @@ import sys
 import tempfile
 import tomllib
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SKILL_NAME = "clean-code-tools"
@@ -37,9 +37,8 @@ class McpRegistrationRequest(BaseModel):
 class McpServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    command: str
-    args: list[str]
-    env: dict[str, str]
+    url: str
+    type: Literal["http"] = "http"
 
 
 class ClaudeMcpConfig(BaseModel):
@@ -132,7 +131,9 @@ def fetch_skill_source_from_main(
     return checkout / "skills" / skill_name
 
 
-def install_skill(source: Path, dest_root: Path, *, name: str, replace: bool, dry_run: bool) -> Path:
+def install_skill(
+    source: Path, dest_root: Path, *, name: str, replace: bool, dry_run: bool
+) -> Path:
     source = source.resolve()
     validate_skill_source(source)
     dest_root = dest_root.expanduser().resolve()
@@ -155,6 +156,32 @@ def install_skill(source: Path, dest_root: Path, *, name: str, replace: bool, dr
 
 
 def install_mcp_runtime(skill: Path, project: Path) -> None:
+    home = shared_mcp_home()
+    bundled = skill / "runtime"
+    installed = home / "runtime"
+    files = [
+        path for path in bundled.rglob("*") if path.is_file() and "__pycache__" not in path.parts
+    ]
+    if (
+        files
+        and (home / "clean-code-index.sqlite").is_file()
+        and all(
+            (installed / path.relative_to(bundled)).is_file()
+            and (installed / path.relative_to(bundled)).read_bytes() == path.read_bytes()
+            for path in files
+        )
+    ):
+        return
+    helper = installed / "scripts/start_shared_mcp.py"
+    if helper.is_file():
+        running = subprocess.run(
+            [str(runtime_python(home)), str(helper), "--home", str(home), "--check"],
+            check=False,
+            capture_output=True,
+        )
+        if running.returncode == 0:
+            message = "Stop the shared clean-code service before updating its runtime."
+            raise InstallError(message)
     installer = skill / "scripts" / "install_clean_code_linting.py"
     run(
         [
@@ -178,28 +205,19 @@ def runtime_python(home: Path) -> Path:
     return home / ".venv" / "bin" / "python"
 
 
-def mcp_server_config(home: Path) -> McpServerConfig:
-    return McpServerConfig(
-        command=str(runtime_python(home)),
-        args=[str(home / "runtime" / "scripts" / "clean_code_mcp_server.py")],
-        env={
-            "CLEAN_CODE_INDEX_BASE": str(home),
-            "CLEAN_CODE_VECTOR_INDEX_PATH": str(home / "clean-code-index.sqlite"),
-        },
+def mcp_server_config(_home: Path) -> McpServerConfig:
+    # Paths belong to the server; agents connect directly without a proxy process.
+    port = TypeAdapter[int](Annotated[int, Field(ge=1, le=65535)]).validate_python(
+        os.environ.get("CLEAN_CODE_MCP_PORT", "8765")
     )
+    return McpServerConfig(url=f"http://127.0.0.1:{port}/mcp")
 
 
 def codex_mcp_block(config: McpServerConfig) -> str:
-    command = json.dumps(config.command)
-    args = ", ".join(json.dumps(argument) for argument in config.args)
-    env = "\n".join(f"{key} = {json.dumps(value)}" for key, value in config.env.items())
     return (
         f"{CODEX_MCP_START}\n"
         f"[mcp_servers.{MCP_SERVER_NAME}]\n"
-        f"command = {command}\n"
-        f"args = [{args}]\n\n"
-        f"[mcp_servers.{MCP_SERVER_NAME}.env]\n"
-        f"{env}\n"
+        f"url = {json.dumps(config.url)}\n"
         f"{CODEX_MCP_END}"
     )
 
@@ -252,7 +270,9 @@ def register_mcp_launcher(*, agent: str, project: Path, home: Path) -> Path:
 
 def shared_mcp_home() -> Path:
     configured = os.environ.get("CLEAN_CODE_TOOLS_HOME")
-    return Path(configured).expanduser().resolve() if configured else Path.home() / ".clean-code-tools"
+    return (
+        Path(configured).expanduser().resolve() if configured else Path.home() / ".clean-code-tools"
+    )
 
 
 def print_mcp_launcher_requirements(home: Path) -> None:
@@ -263,6 +283,17 @@ def print_mcp_launcher_requirements(home: Path) -> None:
     print("After restarting the agent, verify search_clean_code_patterns returns results.")
 
 
+def start_shared_runtime(home: Path) -> None:
+    run(
+        [
+            str(runtime_python(home)),
+            str(home / "runtime/scripts/start_shared_mcp.py"),
+            "--home",
+            str(home),
+        ]
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(description="Install the clean-code agent skill into a project.")
     cli.add_argument(
@@ -271,12 +302,18 @@ def parser() -> argparse.ArgumentParser:
         default="codex",
         help="Project-local agent skills directory to target when --dest is not set.",
     )
-    cli.add_argument("--project", default=".", help="Project root for the local skill installation.")
+    cli.add_argument(
+        "--project", default=".", help="Project root for the local skill installation."
+    )
     cli.add_argument("--source", default=str(DEFAULT_SOURCE), help="Skill source directory.")
     cli.add_argument("--dest", help="Destination skills directory.")
     cli.add_argument("--name", default=DEFAULT_SKILL_NAME, help="Installed skill directory name.")
-    cli.add_argument("--replace", action="store_true", help="Overwrite an existing installed skill.")
-    cli.add_argument("--dry-run", action="store_true", help="Print the destination without copying files.")
+    cli.add_argument(
+        "--replace", action="store_true", help="Overwrite an existing installed skill."
+    )
+    cli.add_argument(
+        "--dry-run", action="store_true", help="Print the destination without copying files."
+    )
     cli.add_argument(
         "--no-mcp-runtime",
         action="store_true",
@@ -333,6 +370,7 @@ def main() -> None:
             install_mcp_runtime(destination, Path(args.project))
             home = shared_mcp_home()
             print(f"Installed and indexed the shared MCP runtime in {home}.")
+            start_shared_runtime(home)
             launcher_config = register_mcp_launcher(
                 agent=args.agent,
                 project=Path(args.project),
