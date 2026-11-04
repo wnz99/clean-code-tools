@@ -30,6 +30,13 @@ stop any service using that home first, including services on a custom port.
 Updates preserve existing custom index entries and runtime-local stores. Legacy
 `runtime/data` records merge into `data`; conflicting IDs stop ingestion without
 overwriting either store. Resolve the conflict and rerun installation.
+Successful migration archives the consumed legacy file as
+`runtime/data/custom-clean-code-patterns.jsonl.migrated`. Later upgrades use the
+current store, so shared-tool edits and deletions persist. If the legacy default
+reappears, installation stops: compare it with the archive and current store,
+apply intended changes through the shared tools, and move the recreated file
+outside the old default path. Keep the archive as a recovery backup, not an
+active store.
 On a clean machine, provide installer dependencies without changing system Python:
 
 ```bash

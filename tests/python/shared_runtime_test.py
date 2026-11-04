@@ -55,9 +55,28 @@ class SharedRuntimeTest(unittest.TestCase):
                 runpy.run_path(str(script), run_name="__main__")
                 with sqlite_vec_store.connect_index(index) as connection:
                     ids = {row[0] for row in connection.execute("select chunk_id from chunk_metadata")}
+                edited = {**sample_pattern("CUSTOM-101"), "title": "Edited after migration"}
+                custom_pattern_tools.upsert_clean_code_pattern_payload(
+                    {"pattern": edited, "custom_patterns_path": str(shared), "index_path": index}
+                )
+                runpy.run_path(str(script), run_name="__main__")
+                migrated = custom_patterns.custom_pattern_by_id("CUSTOM-101", path=str(shared))
+                self.assertEqual(migrated.title, "Edited after migration")
+                custom_pattern_tools.delete_custom_clean_code_pattern_payload(
+                    "CUSTOM-101", str(shared), index_path=index
+                )
+                runpy.run_path(str(script), run_name="__main__")
+                self.assertIsNone(custom_patterns.custom_pattern_by_id("CUSTOM-101", path=str(shared)))
+                with sqlite_vec_store.connect_index(index) as connection:
+                    deleted = connection.execute(
+                        "select chunk_id from chunk_metadata where chunk_id = ?",
+                        ("custom-pattern:CUSTOM-101",),
+                    ).fetchone()
+                    self.assertIsNone(deleted)
             for suffix in ("101", "102", "103"):
                 self.assertIn(f"custom-pattern:CUSTOM-{suffix}", ids)
-            self.assertTrue(legacy.is_file())
+            self.assertFalse(legacy.exists())
+            self.assertTrue(legacy.with_suffix(".jsonl.migrated").is_file())
 
     def test_migrate_both_defaults_and_reject_conflicting_records(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -74,14 +93,30 @@ class SharedRuntimeTest(unittest.TestCase):
             for path, record in [(shared, first), (legacy, second)]:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(json.dumps(record) + "\n")
-            shared_runtime.migrate_custom_store(config)
-            self.assertEqual(len(custom_patterns.load_custom_patterns(str(shared))), 2)
-            shared_runtime.migrate_custom_store(config)
             before = shared.read_bytes()
             legacy.write_text(json.dumps({**first, "title": "Conflict"}) + "\n")
             with self.assertRaisesRegex(ValueError, "Conflicting custom pattern"):
                 shared_runtime.migrate_custom_store(config)
             self.assertEqual(shared.read_bytes(), before)
+            self.assertTrue(legacy.exists())
+            legacy.write_text(json.dumps(second) + "\n")
+            shared_runtime.migrate_custom_store(config)
+            self.assertEqual(len(custom_patterns.load_custom_patterns(str(shared))), 2)
+            shared_runtime.migrate_custom_store(config)
+            before = shared.read_bytes()
+            legacy.write_text(json.dumps({**first, "title": "Conflict"}) + "\n")
+            with self.assertRaisesRegex(ValueError, "Legacy custom store reappeared"):
+                shared_runtime.migrate_custom_store(config)
+            self.assertEqual(shared.read_bytes(), before)
+
+    def test_empty_legacy_store_is_archived_once(self):
+        legacy = self.config.home / "runtime/data/custom-clean-code-patterns.jsonl"
+        legacy.parent.mkdir(parents=True)
+        legacy.touch()
+        with patch.dict(os.environ, self.config.environment()):
+            shared_runtime.migrate_custom_store(self.config)
+            shared_runtime.migrate_custom_store(self.config)
+        self.assertEqual(legacy.with_suffix(".jsonl.migrated").read_bytes(), b"")
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

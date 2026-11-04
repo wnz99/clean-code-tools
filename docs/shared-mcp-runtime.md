@@ -86,7 +86,13 @@ overlays runtime files to retain user stores and refreshes the index without
 resetting custom entries. Both historical defaults (`runtime/data` and `data`
 under the runtime home) are merged into the shared `data` store. Conflicting
 records with the same ID stop ingestion before changing either store; reconcile
-those records and rerun installation. Legacy files remain available. Retain custom
+those records and rerun installation. After a successful merge, the legacy source
+is renamed to `runtime/data/custom-clean-code-patterns.jsonl.migrated` as a backup.
+Subsequent upgrades use only the current store, preserving later edits/deletions.
+If a legacy default is recreated, installation fails before merging it: compare
+it with the current store and archived backup, apply intended changes through
+the shared tools, then move the recreated legacy file outside its old path.
+Retain the archive for recovery; do not use it as an active store. Retain custom
 records and the existing index; restart after upgrading and verify lookup/search.
 To roll back a client, restore its previous configuration and restart the agent.
 The original stdio command is still supported.

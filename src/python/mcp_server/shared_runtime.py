@@ -80,7 +80,7 @@ class RuntimeHealth(BaseModel):
 
 
 def migrate_custom_store(config: SharedRuntimeConfig) -> None:
-    """Merge historical defaults; reject conflicting IDs before writing anything."""
+    """Merge the historical default once, retaining its consumed input as a backup."""
     from mcp_server.custom_patterns import (  # noqa: PLC0415
         load_custom_patterns,
         write_custom_patterns,
@@ -88,6 +88,12 @@ def migrate_custom_store(config: SharedRuntimeConfig) -> None:
 
     destination = config.home / "data/custom-clean-code-patterns.jsonl"
     legacy = config.home / "runtime/data/custom-clean-code-patterns.jsonl"
+    archive = legacy.with_suffix(".jsonl.migrated")
+    if not legacy.exists():
+        return
+    if archive.exists():
+        message = f"Legacy custom store reappeared after migration: {legacy}; reconcile it with {destination} and {archive}"
+        raise ValueError(message)
     records = {}
     for record in [*load_custom_patterns(str(destination)), *load_custom_patterns(str(legacy))]:
         existing = records.get(record.id)
@@ -97,6 +103,8 @@ def migrate_custom_store(config: SharedRuntimeConfig) -> None:
         records[record.id] = record
     if records:
         write_custom_patterns(list(records.values()), path=str(destination))
+    # Preserve the source until the destination write succeeds.
+    legacy.rename(archive)
 
 
 def register_shared_health(server: FastMCP) -> None:
