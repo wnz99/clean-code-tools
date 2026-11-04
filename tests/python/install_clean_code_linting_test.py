@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import concurrent.futures
 import importlib.util
 import json
+import os
+import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest import mock
+
+from filelock import FileLock, Timeout
 
 MODULE_PATH = (
     Path(__file__).resolve().parents[2]
@@ -38,6 +44,91 @@ def run_git(repo: Path, *args: str) -> None:
 
 
 class CleanCodeInstallerTest(unittest.TestCase):
+    def test_running_service_on_nondefault_port_blocks_actual_update(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = root / "project"
+            repo.mkdir()
+            home = root / "home"
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                port = listener.getsockname()[1]
+            environment = {**os.environ, installer.MCP_HOME_ENV: str(home)}
+            with mock.patch.dict(os.environ, environment):
+                installer.apply_mcp_runtime(repo)
+            script = home / "runtime/scripts/clean_code_mcp_server.py"
+            process = subprocess.Popen(
+                [sys.executable, str(script), "--shared"],
+                env={**environment, "CLEAN_CODE_MCP_PORT": str(port)},
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            try:
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    self.assertIsNone(process.poll())
+                    try:
+                        with FileLock(str(home / "shared-server.lock"), timeout=0):
+                            pass
+                    except Timeout:
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail("service did not acquire lifetime ownership")
+                plan = installer.Plan(repo=repo, git_root=repo)
+                plan.changes.append(installer.Change("runtime", "update"))
+                options = installer.ApplyOptions(
+                    wants_mcp_runtime=True, hook_choice="none", hook_mode="advisory",
+                    assume_yes=True, skip_install=True, create_backup=False,
+                )
+                with (
+                    mock.patch.dict(os.environ, {**environment, "CLEAN_CODE_MCP_PORT": "8765"}),
+                    self.assertRaisesRegex(SystemExit, "Stop the shared"),
+                ):
+                    installer.apply_requested_setup(plan, options)
+            finally:
+                process.terminate()
+                process.wait(timeout=10)
+
+    def test_runtime_update_holds_both_locks_through_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = root / "project"
+            repo.mkdir()
+            home = root / "home"
+            plan = installer.Plan(repo=repo, git_root=repo)
+            plan.changes.append(installer.Change("runtime", "upgrade"))
+            options = installer.ApplyOptions(
+                wants_mcp_runtime=True, hook_choice="none", hook_mode="advisory",
+                assume_yes=True, skip_install=True, create_backup=False,
+            )
+
+            def check_locks(*_args, **_kwargs):
+                for name in ("shared-start.lock", "shared-server.lock"):
+                    def contender(lock_name=name):
+                        with FileLock(str(home / lock_name), timeout=0):
+                            self.fail("update released ownership before indexing finished")
+                    with (
+                        concurrent.futures.ThreadPoolExecutor() as pool,
+                        self.assertRaises(Timeout),
+                    ):
+                        pool.submit(contender).result()
+
+            with (
+                mock.patch.dict(installer.os.environ, {installer.MCP_HOME_ENV: str(home)}),
+                mock.patch.object(installer, "run_planned_commands", side_effect=check_locks),
+            ):
+                installer.apply_requested_setup(plan, options)
+                for name in ("shared-start.lock", "shared-server.lock"):
+                    with FileLock(str(home / name), timeout=0):
+                        pass
+                # Lifetime ownership is home-based even when the service port differs.
+                with (
+                    FileLock(str(home / "shared-server.lock"), timeout=0),
+                    mock.patch.dict(installer.os.environ, {"CLEAN_CODE_MCP_PORT": "18766"}),
+                    self.assertRaisesRegex(SystemExit, "Stop the shared"),
+                ):
+                    installer.apply_requested_setup(plan, options)
+
     def test_run_raises_command_output_on_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(SystemExit) as raised:
@@ -539,9 +630,13 @@ class CleanCodeInstallerTest(unittest.TestCase):
             self.assertFalse((repo / ".clean-code-mcp").exists())
             stale_file = runtime / "runtime" / "stale.py"
             stale_file.write_text("obsolete")
+            custom_store = runtime / "runtime" / "stores" / "team.jsonl"
+            custom_store.parent.mkdir()
+            custom_store.write_text('{"user": "preserved"}\n')
             with mock.patch.dict(installer.os.environ, {installer.MCP_HOME_ENV: str(runtime)}):
                 installer.apply_mcp_runtime(repo)
-            self.assertFalse(stale_file.exists())
+            self.assertTrue(stale_file.exists())
+            self.assertEqual(custom_store.read_text(), '{"user": "preserved"}\n')
 
             runtime_python = runtime / "runtime" / "src" / "python"
             check_cache = """

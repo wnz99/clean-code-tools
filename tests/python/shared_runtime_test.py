@@ -2,23 +2,87 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import json
 import os
+import runpy
+import sys
 import tempfile
+import types
 import unittest
 import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx
+from custom_patterns_test import sample_pattern
+from mcp_server import (
+    custom_pattern_tools,
+    custom_patterns,
+    semantic,
+    server,
+    shared_runtime,
+    sqlite_vec_store,
+)
+from mcp_server.pattern_models import CustomCleanCodePattern
 from pydantic import ValidationError
 from starlette.middleware import Middleware
 from starlette.responses import PlainTextResponse
 
-from mcp_server import custom_pattern_tools, server, shared_runtime
-from custom_patterns_test import sample_pattern
-
 
 class SharedRuntimeTest(unittest.TestCase):
+    def test_real_shared_ingestion_preserves_unlisted_index_entries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            config = shared_runtime.SharedRuntimeConfig(home=home)
+            index = str(home / "clean-code-index.sqlite")
+            legacy = home / "runtime/data/custom-clean-code-patterns.jsonl"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text(json.dumps(sample_pattern("CUSTOM-101")) + "\n")
+            shared = home / "data/custom-clean-code-patterns.jsonl"
+            shared.parent.mkdir(parents=True)
+            shared.write_text(json.dumps(sample_pattern("CUSTOM-102")) + "\n")
+            orphan = custom_patterns.custom_pattern_chunk(
+                CustomCleanCodePattern.model_validate(sample_pattern("CUSTOM-103"))
+            )
+            script = Path(__file__).resolve().parents[2] / "scripts/sqlite_vec_ingest_clean_code.py"
+            with (
+                patch.dict(os.environ, config.environment()),
+                patch.object(sqlite_vec_store, "embed_texts", side_effect=lambda texts, **_: [[1.0, 0.0] for _ in texts]),
+                patch.dict(sys.modules, {"_mcp_app": types.SimpleNamespace(load_semantic_module=lambda: semantic)}),
+                patch.object(sys, "argv", [str(script), "--index-path", index, "--shared-home", str(home), "--no-reset"]),
+            ):
+                sqlite_vec_store.ingest_chunks(chunks=[orphan], index_path=index)
+                runpy.run_path(str(script), run_name="__main__")
+                with sqlite_vec_store.connect_index(index) as connection:
+                    ids = {row[0] for row in connection.execute("select chunk_id from chunk_metadata")}
+            for suffix in ("101", "102", "103"):
+                self.assertIn(f"custom-pattern:CUSTOM-{suffix}", ids)
+            self.assertTrue(legacy.is_file())
+
+    def test_migrate_both_defaults_and_reject_conflicting_records(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            config = shared_runtime.SharedRuntimeConfig(home=home)
+            environment = patch.dict(os.environ, config.environment())
+            environment.start()
+            self.addCleanup(environment.stop)
+            shared = home / "data/custom-clean-code-patterns.jsonl"
+            legacy = home / "runtime/data/custom-clean-code-patterns.jsonl"
+            shared_runtime.migrate_custom_store(config)
+            first = sample_pattern()
+            second = {**first, "id": "CUSTOM-002"}
+            for path, record in [(shared, first), (legacy, second)]:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(record) + "\n")
+            shared_runtime.migrate_custom_store(config)
+            self.assertEqual(len(custom_patterns.load_custom_patterns(str(shared))), 2)
+            shared_runtime.migrate_custom_store(config)
+            before = shared.read_bytes()
+            legacy.write_text(json.dumps({**first, "title": "Conflict"}) + "\n")
+            with self.assertRaisesRegex(ValueError, "Conflicting custom pattern"):
+                shared_runtime.migrate_custom_store(config)
+            self.assertEqual(shared.read_bytes(), before)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

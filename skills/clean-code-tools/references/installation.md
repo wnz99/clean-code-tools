@@ -24,6 +24,22 @@ Codex blocks; unmanaged entries require an explicit migration.
 Tell the user to restart the agent after installation.
 
 The default runtime home is `${CLEAN_CODE_TOOLS_HOME:-~/.clean-code-tools}`.
+The installer Python requires `filelock` for exclusive runtime updates. Updates
+hold the startup and lifetime locks through copying, dependencies, and indexing;
+stop any service using that home first, including services on a custom port.
+Updates preserve existing custom index entries and runtime-local stores. Legacy
+`runtime/data` records merge into `data`; conflicting IDs stop ingestion without
+overwriting either store. Resolve the conflict and rerun installation.
+On a clean machine, provide installer dependencies without changing system Python:
+
+```bash
+uv run --with pydantic --with 'filelock>=3.29.0' python /path/to/clean-code-tools/scripts/install_codex_skill.py --agent codex --replace
+uv run --with 'filelock>=3.29.0' python /path/to/clean-code-tools/scripts/install_clean_code_linting.py
+```
+
+Use the same `uv run --with` prefix for the apply commands below when those
+dependencies are absent from your selected Python environment. Store migration
+runs later in the isolated runtime environment, after its dependencies install.
 Runtime files, dependencies, indexes, and logs stay outside the target project.
 After restart, call `clean_code_index_info`, then make a narrow
 `search_clean_code_patterns` query. Installation is complete only when both

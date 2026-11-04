@@ -79,6 +79,26 @@ class RuntimeHealth(BaseModel):
     pid: int = Field(gt=0)
 
 
+def migrate_custom_store(config: SharedRuntimeConfig) -> None:
+    """Merge historical defaults; reject conflicting IDs before writing anything."""
+    from mcp_server.custom_patterns import (  # noqa: PLC0415
+        load_custom_patterns,
+        write_custom_patterns,
+    )
+
+    destination = config.home / "data/custom-clean-code-patterns.jsonl"
+    legacy = config.home / "runtime/data/custom-clean-code-patterns.jsonl"
+    records = {}
+    for record in [*load_custom_patterns(str(destination)), *load_custom_patterns(str(legacy))]:
+        existing = records.get(record.id)
+        if existing is not None and existing != record:
+            message = f"Conflicting custom pattern {record.id}: {legacy} and {destination}"
+            raise ValueError(message)
+        records[record.id] = record
+    if records:
+        write_custom_patterns(list(records.values()), path=str(destination))
+
+
 def register_shared_health(server: FastMCP) -> None:
     @server.custom_route("/health", methods=[HTTP_GET])
     async def health(_request: Request) -> JSONResponse:

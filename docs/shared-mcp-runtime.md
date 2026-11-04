@@ -80,7 +80,13 @@ not in the client's working directory, and existing path restrictions remain.
 Custom-store mutations hold a lock through index synchronization and rollback.
 
 Stop the service before updating its files or rebuilding the index. The skill
-installer refuses to overwrite a healthy running shared service. Retain custom
+installer holds startup and lifetime locks throughout file replacement,
+dependency installation, and indexing, independent of the service port. It
+overlays runtime files to retain user stores and refreshes the index without
+resetting custom entries. Both historical defaults (`runtime/data` and `data`
+under the runtime home) are merged into the shared `data` store. Conflicting
+records with the same ID stop ingestion before changing either store; reconcile
+those records and rerun installation. Legacy files remain available. Retain custom
 records and the existing index; restart after upgrading and verify lookup/search.
 To roll back a client, restore its previous configuration and restart the agent.
 The original stdio command is still supported.
